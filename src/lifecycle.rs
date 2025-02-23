@@ -1,9 +1,9 @@
 #![allow(unused)]
-use crate::config::{mutate_config, replace_config, take_config, SuiRouteConfig};
-use crate::ic_sui::sui_providers::Provider;
+use crate::config::{mutate_config, replace_config, take_config, RouteConfig};
+use crate::aptos_client::aptos_providers::Provider;
 use crate::memory::init_config;
-use crate::migration::{migrate_config, PreConfig};
-use crate::state::{replace_state, SuiRouteState};
+
+use crate::state::{replace_state, RouteState};
 use crate::types::ChainState;
 
 use candid::{CandidType, Principal};
@@ -31,13 +31,13 @@ pub struct InitArgs {
 }
 
 pub fn init(args: InitArgs) {
-    let config = SuiRouteConfig::from(args);
+    let config = RouteConfig::from(args);
     config.validate_config();
     log!(DEBUG, "lifecycle::init config:{:?}", config);
     let mut stable_config = init_config();
     stable_config.set(config);
     replace_config(stable_config);
-    let state = SuiRouteState::init();
+    let state = RouteState::init();
     replace_state(state);
 }
 
@@ -58,7 +58,7 @@ pub struct UpgradeArgs {
 
 pub fn post_upgrade(args: Option<UpgradeArgs>) {
     // load state
-    let state = SuiRouteState::init();
+    let state = RouteState::init();
     replace_state(state);
 
     // load config

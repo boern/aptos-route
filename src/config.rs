@@ -1,12 +1,11 @@
 #![allow(unused)]
+use crate::aptos_client::LocalAccount;
 use crate::constants::{DEFAULT_GAS_BUDGET, FEE_TOKEN, NODES_IN_FIDUCIARY_SUBNET};
 
+use crate::aptos_client::aptos_providers::Provider;
+use crate::aptos_client::constants::NODES_IN_SUBNET;
+use crate::ck_eddsa::KeyType;
 use crate::ic_log::{DEBUG, ERROR};
-use crate::ic_sui::ck_eddsa::KeyType;
-use crate::ic_sui::constants::NODES_IN_SUBNET;
-use crate::ic_sui::rpc_client::RpcResult;
-use crate::ic_sui::sui_json_rpc_types::SuiEvent;
-use crate::ic_sui::sui_providers::Provider;
 
 use crate::memory::Memory;
 use crate::types::{ChainId, ChainState, Factor};
@@ -28,7 +27,7 @@ pub type CanisterId = Principal;
 pub type Owner = String;
 pub type MintAccount = String;
 pub type AssociatedAccount = String;
-pub type StableRouteConfig = StableCell<SuiRouteConfig, Memory>;
+pub type StableRouteConfig = StableCell<RouteConfig, Memory>;
 
 thread_local! {
     static CONFIG: RefCell<Option<StableRouteConfig>> = RefCell::default();
@@ -38,6 +37,7 @@ thread_local! {
 pub struct Seqs {
     pub next_ticket_seq: u64,
     pub next_directive_seq: u64,
+    pub tx_seq: u64,
 }
 
 #[derive(CandidType, Clone, Debug, Deserialize, Serialize, Default, PartialEq, Eq)]
@@ -69,52 +69,52 @@ impl MultiRpcConfig {
         Ok(())
     }
 
-    pub fn valid_and_get_result(
-        &self,
-        responses: &Vec<RpcResult<Vec<SuiEvent>>>,
-    ) -> Result<Vec<SuiEvent>, String> {
-        self.check_config_valid()?;
-        let mut events_list = vec![];
-        // let mut success_response_body_list = vec![];
+    // pub fn valid_and_get_result(
+    //     &self,
+    //     responses: &Vec<RpcResult<Vec<SuiEvent>>>,
+    // ) -> Result<Vec<SuiEvent>, String> {
+    //     self.check_config_valid()?;
+    //     let mut events_list = vec![];
+    //     // let mut success_response_body_list = vec![];
 
-        for response in responses {
-            log!(
-                DEBUG,
-                "[state::valid_and_get_result] input response: {:?}",
-                response
-            );
-            match response {
-                Ok(events) => events_list.push(events),
-                Err(e) => {
-                    log!(
-                        ERROR,
-                        "[state::valid_and_get_result] response error: {:?}",
-                        e.to_string()
-                    );
-                    continue;
-                }
-            }
-        }
+    //     for response in responses {
+    //         log!(
+    //             DEBUG,
+    //             "[state::valid_and_get_result] input response: {:?}",
+    //             response
+    //         );
+    //         match response {
+    //             Ok(events) => events_list.push(events),
+    //             Err(e) => {
+    //                 log!(
+    //                     ERROR,
+    //                     "[state::valid_and_get_result] response error: {:?}",
+    //                     e.to_string()
+    //                 );
+    //                 continue;
+    //             }
+    //         }
+    //     }
 
-        if events_list.len() < self.minimum_response_count as usize {
-            return Err(format!(
-                "Not enough valid response, expected: {}, actual: {}",
-                self.minimum_response_count,
-                events_list.len()
-            ));
-        }
+    //     if events_list.len() < self.minimum_response_count as usize {
+    //         return Err(format!(
+    //             "Not enough valid response, expected: {}, actual: {}",
+    //             self.minimum_response_count,
+    //             events_list.len()
+    //         ));
+    //     }
 
-        // The minimum_response_count should greater than 0
-        let mut i = 1;
-        while i < events_list.len() {
-            if events_list[i - 1] != events_list[i] {
-                return Err("Response mismatch".to_string());
-            }
-            i += 1;
-        }
+    //     // The minimum_response_count should greater than 0
+    //     let mut i = 1;
+    //     while i < events_list.len() {
+    //         if events_list[i - 1] != events_list[i] {
+    //             return Err("Response mismatch".to_string());
+    //         }
+    //         i += 1;
+    //     }
 
-        Ok(events_list[0].to_owned())
-    }
+    //     Ok(events_list[0].to_owned())
+    // }
 }
 
 pub const KEY_TYPE_NAME: &str = "Native";
@@ -134,7 +134,7 @@ impl From<KeyType> for SnorKeyType {
 }
 
 #[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct SuiPortAction {
+pub struct AptosPortAction {
     pub package: String,
     pub module: String,
     pub functions: HashSet<String>,
@@ -143,7 +143,7 @@ pub struct SuiPortAction {
     pub upgrade_cap: String,
 }
 
-impl Storable for SuiPortAction {
+impl Storable for AptosPortAction {
     fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
         let bytes = bincode::serialize(&self).expect("failed to serialize SuiPortAction");
         Cow::Owned(bytes)
@@ -157,7 +157,7 @@ impl Storable for SuiPortAction {
 }
 
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
-pub struct SuiRouteConfig {
+pub struct RouteConfig {
     pub chain_id: String,
     pub hub_principal: Principal,
     pub seqs: Seqs,
@@ -177,10 +177,11 @@ pub struct SuiRouteConfig {
     pub forward: Option<String>,
     pub enable_debug: bool,
     pub key_type: KeyType,
-    pub sui_port_action: SuiPortAction,
+    pub sui_port_action: AptosPortAction,
+    // pub local_account: LocalAccount,
     // pub sui_route_address: HashMap<KeyType, Vec<u8>>,
 }
-impl Default for SuiRouteConfig {
+impl Default for RouteConfig {
     fn default() -> Self {
         Self {
             chain_id: String::default(),
@@ -201,14 +202,16 @@ impl Default for SuiRouteConfig {
             forward: None,
             enable_debug: false,
             key_type: KeyType::ChainKey,
-            sui_port_action: SuiPortAction::default(),
+            sui_port_action: AptosPortAction::default(),
             // sui_route_address: HashMap::default(),
         }
     }
 }
 
-impl From<InitArgs> for SuiRouteConfig {
+impl From<InitArgs> for RouteConfig {
     fn from(args: InitArgs) -> Self {
+        //TODO: init local account for aptos
+
         Self {
             chain_id: args.chain_id,
             hub_principal: args.hub_principal,
@@ -230,13 +233,13 @@ impl From<InitArgs> for SuiRouteConfig {
             forward: None,
             enable_debug: false,
             key_type: KeyType::ChainKey,
-            sui_port_action: SuiPortAction::default(),
+            sui_port_action: AptosPortAction::default(),
             // sui_route_address: HashMap::default(),
         }
     }
 }
 
-impl Storable for SuiRouteConfig {
+impl Storable for RouteConfig {
     fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
         let bytes = bincode::serialize(&self).expect("failed to serialize SuiRouteConfig");
         Cow::Owned(bytes)
@@ -249,7 +252,7 @@ impl Storable for SuiRouteConfig {
     const BOUND: Bound = Bound::Unbounded;
 }
 
-impl SuiRouteConfig {
+impl RouteConfig {
     pub fn validate_config(&self) {}
     pub fn get_fee(&self, chain_id: ChainId) -> Option<u128> {
         read_config(|s| {
@@ -283,7 +286,7 @@ impl SuiRouteConfig {
 
 pub fn take_config<F, R>(f: F) -> R
 where
-    F: FnOnce(SuiRouteConfig) -> R,
+    F: FnOnce(RouteConfig) -> R,
 {
     CONFIG.with(|c| {
         let config = c.take().expect("Config not initialized!").get().to_owned();

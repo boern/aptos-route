@@ -17,7 +17,37 @@ aptos_route_address=$(dfx canister call aptos_route aptos_route_address "($KEYTY
 aptos_route_address=$(echo "$aptos_route_address" | awk -F'"' '{print $2}' | tr -d '[:space:]')
 echo "aptos_route_address: $aptos_route_address"
 # requrie faucet
-aptos client faucet --address $aptos_route_address
+faucet_amount=200000000
+aptos account fund-with-faucet --account $aptos_route_address --amount $faucet_amount
+
+# get account info
+curl --request GET \
+  --url https://api.devnet.aptoslabs.com/v1/accounts/${aptos_route_address} \
+  --header 'Accept: application/json' | jq
+# get account balance
+asset_type="0x1::aptos_coin::AptosCoin"
+curl --request GET \
+  --url https://api.devnet.aptoslabs.com/v1/accounts/$aptos_route_address/balance/${asset_type} \
+  --header 'Accept: application/json' | jq
+
+
+# get account from canister 
+dfx canister call aptos_route get_account "(\"${aptos_route_address}\",null)" --network $NETWORK
+
+
+dfx canister call aptos_route seqs '()' --network $NETWORK
+
+dfx canister call aptos_route update_seqs '( record {next_ticket_seq=0:nat64; next_directive_seq=0:nat64; tx_seq=0:nat64})' --network $NETWORK
+# dfx canister call aptos_route update_seqs '( record={0;0;0})' --network $NETWORK
+# transfer apto from route to recipent
+recipient="0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8"
+amount=10000000
+# KEYTYPE="variant { Native }"
+KEYTYPE="variant { ChainKey }"
+dfx canister call aptos_route verfy_txn "(\"${recipient}\",${amount},$KEYTYPE)" --network $NETWORK
+
+dfx canister call aptos_route transfer_aptos_from_route "(\"${recipient}\",${amount},${KEYTYPE})" --network $NETWORK
+
 
 # transfer aptos to init signer
 # 1  MIST = 0.000_000_001 aptos.

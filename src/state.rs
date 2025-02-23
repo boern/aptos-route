@@ -1,16 +1,16 @@
 #![allow(unused)]
-use crate::config::{mutate_config, read_config, SuiRouteConfig};
-use crate::handler::burn_token::BurnTx;
-use crate::handler::clear_ticket::ClearTx;
-use crate::handler::gen_ticket::GenerateTicketReq;
-use crate::ic_sui::ck_eddsa::KeyType;
+use crate::ck_eddsa::KeyType;
+use crate::config::{mutate_config, read_config, RouteConfig};
+// use crate::handler::burn_token::BurnTx;
+// use crate::handler::clear_ticket::ClearTx;
+// use crate::handler::gen_ticket::GenerateTicketReq;
 use crate::lifecycle::InitArgs;
 use crate::memory::Memory;
 use candid::{CandidType, Principal};
 use ic_stable_structures::StableBTreeMap;
 use ic_stable_structures::StableCell;
 
-use crate::handler::mint_token::MintTokenRequest;
+// use crate::handler::mint_token::MintTokenRequest;
 use crate::types::{Chain, ChainId, Ticket, TicketId, ToggleState, Token, TokenId};
 use ic_stable_structures::storable::Bound;
 use ic_stable_structures::Storable;
@@ -25,7 +25,7 @@ pub type AssociatedAccount = String;
 
 thread_local! {
 
-    static STATE: RefCell<Option<SuiRouteState>> = RefCell::default();
+    static STATE: RefCell<Option<RouteState>> = RefCell::default();
 }
 
 #[derive(CandidType, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,7 +126,7 @@ impl From<Token> for TokenResp {
 }
 
 #[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SuiToken {
+pub struct AptosToken {
     pub package: String,
     pub module: String,
     pub functions: HashSet<String>,
@@ -136,7 +136,7 @@ pub struct SuiToken {
     pub upgrade_cap: String,
 }
 
-impl Storable for SuiToken {
+impl Storable for AptosToken {
     fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
         let bytes = bincode::serialize(&self).expect("failed to serialize SuiTokenInfo");
         Cow::Owned(bytes)
@@ -150,7 +150,7 @@ impl Storable for SuiToken {
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct SuiRouteState {
+pub struct RouteState {
     // stable storage
     // #[serde(skip, default = "crate::memory::init_config")]
     // pub route_config: StableCell<SuiRouteConfig, Memory>,
@@ -163,24 +163,24 @@ pub struct SuiRouteState {
     #[serde(skip, default = "crate::memory::init_tokens")]
     pub tokens: StableBTreeMap<TokenId, Token, Memory>,
     #[serde(skip, default = "crate::memory::init_sui_tokens")]
-    pub sui_tokens: StableBTreeMap<TokenId, SuiToken, Memory>,
-    #[serde(skip, default = "crate::memory::init_update_tokens")]
-    pub update_token_queue: StableBTreeMap<UpdateType, UpdateTokenStatus, Memory>,
-    #[serde(skip, default = "crate::memory::init_mint_token_requests")]
-    pub mint_token_requests: StableBTreeMap<TicketId, MintTokenRequest, Memory>,
-    #[serde(skip, default = "crate::memory::init_gen_ticket_reqs")]
-    pub gen_ticket_reqs: StableBTreeMap<TicketId, GenerateTicketReq, Memory>,
+    pub sui_tokens: StableBTreeMap<TokenId, AptosToken, Memory>,
+    // #[serde(skip, default = "crate::memory::init_update_tokens")]
+    // pub update_token_queue: StableBTreeMap<UpdateType, UpdateTokenStatus, Memory>,
+    // #[serde(skip, default = "crate::memory::init_mint_token_requests")]
+    // pub mint_token_requests: StableBTreeMap<TicketId, MintTokenRequest, Memory>,
+    // #[serde(skip, default = "crate::memory::init_gen_ticket_reqs")]
+    // pub gen_ticket_reqs: StableBTreeMap<TicketId, GenerateTicketReq, Memory>,
     #[serde(skip, default = "crate::memory::init_seed")]
     pub seeds: StableBTreeMap<String, [u8; 64], Memory>,
-    #[serde(skip, default = "crate::memory::init_sui_addresses")]
-    pub sui_route_addresses: StableBTreeMap<KeyType, Vec<u8>, Memory>,
-    #[serde(skip, default = "crate::memory::init_clr_ticket_queue")]
-    pub clr_ticket_queue: StableBTreeMap<String, ClearTx, Memory>,
-    #[serde(skip, default = "crate::memory::init_burn_tokens")]
-    pub burn_tokens: StableBTreeMap<String, BurnTx, Memory>,
+    #[serde(skip, default = "crate::memory::init_route_addresses")]
+    pub route_addresses: StableBTreeMap<KeyType, Vec<u8>, Memory>,
+    // #[serde(skip, default = "crate::memory::init_clr_ticket_queue")]
+    // pub clr_ticket_queue: StableBTreeMap<String, ClearTx, Memory>,
+    // #[serde(skip, default = "crate::memory::init_burn_tokens")]
+    // pub burn_tokens: StableBTreeMap<String, BurnTx, Memory>,
 }
 
-impl SuiRouteState {
+impl RouteState {
     pub fn init() -> Self {
         Self {
             tickets_queue: StableBTreeMap::init(crate::memory::get_ticket_queue_memory()),
@@ -188,15 +188,15 @@ impl SuiRouteState {
             counterparties: StableBTreeMap::init(crate::memory::get_counterparties_memory()),
             tokens: StableBTreeMap::init(crate::memory::get_tokens_memory()),
             sui_tokens: StableBTreeMap::init(crate::memory::get_sui_tokens_memory()),
-            update_token_queue: StableBTreeMap::init(crate::memory::get_update_tokens_memory()),
-            mint_token_requests: StableBTreeMap::init(
-                crate::memory::get_mint_token_requests_memory(),
-            ),
-            gen_ticket_reqs: StableBTreeMap::init(crate::memory::get_gen_ticket_req_memory()),
+            // update_token_queue: StableBTreeMap::init(crate::memory::get_update_tokens_memory()),
+            // mint_token_requests: StableBTreeMap::init(
+            //     crate::memory::get_mint_token_requests_memory(),
+            // ),
+            // gen_ticket_reqs: StableBTreeMap::init(crate::memory::get_gen_ticket_req_memory()),
             seeds: StableBTreeMap::init(crate::memory::get_seeds_memory()),
-            sui_route_addresses: StableBTreeMap::init(crate::memory::get_sui_addresses_memory()),
-            clr_ticket_queue: StableBTreeMap::init(crate::memory::get_clr_ticket_queue_memory()),
-            burn_tokens: StableBTreeMap::init(crate::memory::get_burn_tokens_memory()),
+            route_addresses: StableBTreeMap::init(crate::memory::get_route_addresses_memory()),
+            // clr_ticket_queue: StableBTreeMap::init(crate::memory::get_clr_ticket_queue_memory()),
+            // burn_tokens: StableBTreeMap::init(crate::memory::get_burn_tokens_memory()),
         }
     }
     pub fn add_chain(&mut self, chain: Chain) {
@@ -224,33 +224,33 @@ impl SuiRouteState {
         }
     }
 
-    pub fn update_mint_token_req(&mut self, ticket_id: String, req: MintTokenRequest) {
-        self.mint_token_requests.insert(ticket_id, req);
-    }
+    // pub fn update_mint_token_req(&mut self, ticket_id: String, req: MintTokenRequest) {
+    //     self.mint_token_requests.insert(ticket_id, req);
+    // }
 }
 
 pub fn take_state<F, R>(f: F) -> R
 where
-    F: FnOnce(SuiRouteState) -> R,
+    F: FnOnce(RouteState) -> R,
 {
     STATE.with(|s| f(s.take().expect("State not initialized!")))
 }
 
 pub fn mutate_state<F, R>(f: F) -> R
 where
-    F: FnOnce(&mut SuiRouteState) -> R,
+    F: FnOnce(&mut RouteState) -> R,
 {
     STATE.with(|s| f(s.borrow_mut().as_mut().expect("State not initialized!")))
 }
 
 pub fn read_state<F, R>(f: F) -> R
 where
-    F: FnOnce(&SuiRouteState) -> R,
+    F: FnOnce(&RouteState) -> R,
 {
     STATE.with(|s| f(s.borrow().as_ref().expect("State not initialized!")))
 }
 
-pub fn replace_state(state: SuiRouteState) {
+pub fn replace_state(state: RouteState) {
     STATE.with(|s| {
         *s.borrow_mut() = Some(state);
     });

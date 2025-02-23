@@ -25,10 +25,10 @@ SCHNORR_KEY_NAME="dfx_test_key"
 # SCHNORR_KEY_NAME="test_key_1"
 # SCHNORR_KEY_NAME="key_1"
 
-SUI_CHAIN_ID="eSui"
+SUI_CHAIN_ID="eAptos"
 FEE_ACCOUNT="0xaf9306cac62396be300b175046140c392eed876bd8ac0efac6301cea286fa272"
 nodes_in_subnet=34
-provider=Testnet
+provider=Devnet
 gas_budget=10000000
 echo upgrade aptos_route ...
 
@@ -49,6 +49,7 @@ dfx deploy aptos_route --mode upgrade --argument "( variant { Upgrade = opt reco
 # dfx deploy --mode upgrade --argument '(variant { Upgrade = null })'  --upgrade-unchanged --yes aptos_route --network $NETWORK
 
 dfx canister status aptos_route --network $NETWORK
+dfx canister call aptos_route get_route_config '()' --network $NETWORK
 # dfx canister call aptos_route stop_schedule '(null)' --network $NETWORK
 
 echo "Upgrade sui route done!"
