@@ -2,8 +2,8 @@
 
 use crate::aptos_client::aptos_providers::Provider;
 use crate::aptos_client::constants::DEVNET_CHAIN_ID;
-use crate::aptos_client::rpc_client::{RpcClient, RpcResult};
-use crate::aptos_client::{rpc_client, transfer, AccountKey, LocalAccount};
+use crate::aptos_client::rest_client::{RestClient, RpcResult};
+use crate::aptos_client::{rest_client, transfer, Account, AccountKey, AptosResult, LocalAccount};
 use crate::auth::{is_admin, set_perms, Permission};
 use crate::call_error::{CallError, Reason};
 use crate::ck_eddsa::KeyType;
@@ -467,7 +467,7 @@ pub fn debug(enable: bool) {
 }
 
 #[update(guard = "is_admin")]
-pub async fn get_account(address: String, ledger_version: Option<u64>) -> RpcResult<String> {
+pub async fn get_account(address: String, ledger_version: Option<u64>) -> Result<String, String> {
     let (provider, nodes, forward) = read_config(|s| {
         (
             s.get().rpc_provider.to_owned(),
@@ -475,9 +475,55 @@ pub async fn get_account(address: String, ledger_version: Option<u64>) -> RpcRes
             s.get().forward.to_owned(),
         )
     });
-    let client = RpcClient::new(provider, Some(nodes));
+    let client = RestClient::new(provider, Some(nodes));
 
-    client.get_account(address, ledger_version, forward).await
+    let ret = client.get_account(address, ledger_version, forward).await;
+    log!(DEBUG, "[service::get_account] get_account ret: {:?}", ret);
+    match ret {
+        Ok(account) => {
+            let account_json = serde_json::to_string(&account).map_err(|e| e.to_string())?;
+            Ok(account_json)
+        }
+        Err(e) => {
+            log!(DEBUG, "[service::get_account] get_account error : {:?}", e);
+            Err(format!("Error getting account: {:?}", e))
+        }
+    }
+}
+
+#[update(guard = "is_admin")]
+pub async fn get_account_balance(
+    address: String,
+    asset_type: Option<String>,
+) -> Result<u64, String> {
+    let (provider, nodes, forward) = read_config(|s| {
+        (
+            s.get().rpc_provider.to_owned(),
+            s.get().nodes_in_subnet,
+            s.get().forward.to_owned(),
+        )
+    });
+    let client = RestClient::new(provider, Some(nodes));
+
+    let ret = client
+        .get_account_balance(address, asset_type, forward)
+        .await;
+    log!(
+        DEBUG,
+        "[service::get_account_balance] get_account_balance ret: {:?}",
+        ret
+    );
+    match ret {
+        Ok(balance) => Ok(balance),
+        Err(e) => {
+            log!(
+                DEBUG,
+                "[service::get_account_balance] get_account_balance error : {:?}",
+                e
+            );
+            Err(format!("Error getting account balance: {:?}", e))
+        }
+    }
 }
 
 #[update(guard = "is_admin")]
@@ -538,7 +584,7 @@ pub async fn transfer_aptos_from_route(
     recipient: String,
     amount: u64,
     key_type: SnorKeyType,
-) -> RpcResult<String> {
+) -> Result<String, String> {
     let (provider, nodes, forward) = read_config(|s| {
         (
             s.get().rpc_provider.to_owned(),
@@ -587,9 +633,10 @@ pub async fn transfer_aptos_from_route(
         txn
     );
     // transfer the aptos coin to a different address
-    let client = RpcClient::new(provider, Some(nodes));
-    let ret = client.transfer_aptos(&txn, forward).await?;
+    let client = RestClient::new(provider, Some(nodes));
+    let ret = client.transfer_aptos(&txn, forward).await;
     log!(DEBUG, "[service::transfer_aptos] result: {:#?} ", ret);
+
     //increase sequence number
     // let latest_tx_seq = local_account.increment_sequence_number();
     // let latest_tx_seq = local_account.sequence_number();
@@ -598,8 +645,49 @@ pub async fn transfer_aptos_from_route(
     //     config.seqs.tx_seq = latest_tx_seq;
     //     s.set(config);
     // });
+    match ret {
+        Ok(pending_tx) => {
+            let pending_tx_json = serde_json::to_string(&pending_tx).map_err(|e| e.to_string())?;
+            Ok(pending_tx_json)
+        }
+        Err(e) => {
+            log!(DEBUG, "[service::transfer_aptos] ret error : {:?}", e);
+            Err(format!("Error transfer_aptos: {:?}", e))
+        }
+    }
+}
 
-    Ok(ret)
+#[update(guard = "is_admin")]
+pub async fn get_transaction_by_hash(txn_hash: String) -> Result<String, String> {
+    let (provider, nodes, forward) = read_config(|s| {
+        (
+            s.get().rpc_provider.to_owned(),
+            s.get().nodes_in_subnet,
+            s.get().forward.to_owned(),
+        )
+    });
+    let client = RestClient::new(provider, Some(nodes));
+
+    let ret = client.get_transaction_by_hash(txn_hash, forward).await;
+    log!(
+        DEBUG,
+        "[service::get_transaction_by_hash] get_transaction_by_hash ret: {:?}",
+        ret
+    );
+    match ret {
+        Ok(account) => {
+            let account_json = serde_json::to_string(&account).map_err(|e| e.to_string())?;
+            Ok(account_json)
+        }
+        Err(e) => {
+            log!(
+                DEBUG,
+                "[service::get_transaction_by_hash] get_transaction_by_hash error : {:?}",
+                e
+            );
+            Err(format!("Error get transaction by hash: {:?}", e))
+        }
+    }
 }
 
 /// Cleans up the HTTP response headers to make them deterministic.

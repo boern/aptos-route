@@ -25,6 +25,14 @@ new: start ## Create and build a new sui route canister on localnet
 build: start ## Build the sui route canister
 	bash ./scripts/build.sh
 
+.PHONY: check
+check: build ## Check the wasm-bindgen deps
+	@if cargo tree 2>/dev/null | grep -q wasm-bindgen; then \
+		cargo tree | grep wasm-bindgen; \
+	else \
+		echo "no found wasm-bindgen !"; \
+	fi
+
 .PHONY: did
 did: ## Extract the did file
 	bash ./scripts/did.sh

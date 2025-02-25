@@ -203,12 +203,12 @@ pub fn sha256(input: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-pub fn hash_with_sha256(input: &str) -> String {
-    let value = sha256(input.as_bytes());
-    hex::encode(value)
-}
+// pub fn hash_with_sha256(input: &str) -> String {
+//     let value = sha256(input.as_bytes());
+//     hex::encode(value)
+// }
 
-pub fn hash_with_sha256_byte(input: &Vec<u8>) -> String {
+pub fn hash_with_sha256(input: &Vec<u8>) -> String {
     let value = sha256(input);
     hex::encode(value)
 }

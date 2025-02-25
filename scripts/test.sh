@@ -32,21 +32,31 @@ curl --request GET \
 
 
 # get account from canister 
-dfx canister call aptos_route get_account "(\"${aptos_route_address}\",null)" --network $NETWORK
+address=$aptos_route_address
+# address="0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d"
+dfx canister call aptos_route get_account "(\"${address}\",null)" --network $NETWORK
+
+address=$aptos_route_address
+address="0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d"
+asset_type="0x1::aptos_coin::AptosCoin"
+dfx canister call aptos_route get_account_balance "(\"${address}\",null)" --network $NETWORK
 
 
 dfx canister call aptos_route seqs '()' --network $NETWORK
 
-dfx canister call aptos_route update_seqs '( record {next_ticket_seq=0:nat64; next_directive_seq=0:nat64; tx_seq=0:nat64})' --network $NETWORK
+dfx canister call aptos_route update_seqs '( record {next_ticket_seq=0:nat64; next_directive_seq=0:nat64; tx_seq=1:nat64})' --network $NETWORK
 # dfx canister call aptos_route update_seqs '( record={0;0;0})' --network $NETWORK
 # transfer apto from route to recipent
 recipient="0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8"
-amount=10000000
+amount=20000000
 # KEYTYPE="variant { Native }"
 KEYTYPE="variant { ChainKey }"
 dfx canister call aptos_route verfy_txn "(\"${recipient}\",${amount},$KEYTYPE)" --network $NETWORK
 
 dfx canister call aptos_route transfer_aptos_from_route "(\"${recipient}\",${amount},${KEYTYPE})" --network $NETWORK
+
+txn_hash="0x169238641c3f97f2bc0b4a46707faf12457de857015f0882c6b2635e17486e4a"
+dfx canister call aptos_route get_transaction_by_hash "(\"${txn_hash}\")" --network $NETWORK
 
 
 # transfer aptos to init signer

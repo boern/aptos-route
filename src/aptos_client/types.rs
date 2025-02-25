@@ -19,27 +19,34 @@ use futures_core::Stream;
 use ic_canister_log::log;
 use ic_cdk::api;
 use ic_cdk::api::management_canister::http_request::{
-    http_request, CanisterHttpRequestArgument, HttpHeader, HttpMethod, TransformContext,
+    http_request, CanisterHttpRequestArgument, HttpHeader, HttpMethod, HttpResponse,
+    TransformContext,
 };
 
 use aptos_crypto::ed25519::{Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature};
 
 use aptos_types::transaction::{authenticator::AuthenticationKey, SignatureCheckedTransaction};
 use move_core_types::account_address::AccountAddress;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::future;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+pub use aptos_api_types::deserialize_from_string;
+use aptos_api_types::{Address, U64};
+
 use crate::ck_eddsa::{self, KeyType};
 
-use serde_bytes::ByteBuf;
-
+use super::error::RestError;
 use super::tx_builder::TransactionBuilder;
+use aptos_api_types::AptosError;
+use move_core_types::{language_storage::StructTag, parser::parse_struct_tag};
+use serde_bytes::ByteBuf;
+pub type AptosResult<T> = Result<T, RestError>;
 
 #[derive(Debug)]
 pub enum LocalAccountAuthenticator {
@@ -168,14 +175,6 @@ pub struct AccountKey {
     authentication_key: AuthenticationKey,
 }
 impl AccountKey {
-    // pub fn generate<R>(rng: &mut R) -> Self
-    // where
-    //     R: rand_core::RngCore + rand_core::CryptoRng,
-    // {
-    //     let private_key = Ed25519PrivateKey::generate(rng);
-    //     Self::from_private_key(private_key)
-    // }
-
     pub async fn account_key(key_type: KeyType) -> Result<AccountKey, String> {
         match key_type {
             KeyType::ChainKey => {
@@ -207,10 +206,6 @@ impl AccountKey {
         }
     }
 
-    // pub fn private_key(&self) -> &Ed25519PrivateKey {
-    //     &self.private_key.expect("No private key")
-    // }
-
     pub fn public_key(&self) -> &Ed25519PublicKey {
         &self.public_key
     }
@@ -220,23 +215,183 @@ impl AccountKey {
     }
 }
 
-//Note: The sui address must be: hash(signature schema + sender public key bytes)
-// pub async fn aptos_route_address(key_type: KeyType) -> Result<AccountAddress, String> {
-//     let account_key = AccountKey::from_chain_key(key_type).await;
-//     let account_address = account_key.authentication_key().account_address();
-//     // let pk = Ed25519PublicKey(ed25519_dalek::PublicKey::from_bytes(&pk_bytes).unwrap());
-//     // let authentication_key = AuthenticationKey::ed25519(&public_key);
-//     // let address = AccountAddress::new(pk_bytes.try_into().map_err(|_| "Invalid length")?);
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Resource {
+    #[serde(rename = "type", deserialize_with = "deserialize_resource_type")]
+    pub resource_type: StructTag,
+    pub data: serde_json::Value,
+}
 
-//     Ok(account_address)
-// }
-// impl From<Ed25519PrivateKey> for AccountKey {
-//     fn from(private_key: Ed25519PrivateKey) -> Self {
-//         Self::from_private_key(private_key)
-//     }
-// }
+pub fn deserialize_from_prefixed_hex_string<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: FromStr,
+    <T as FromStr>::Err: std::fmt::Display,
+{
+    use serde::de::Error;
 
-// #[derive(Debug)]
-// pub struct Ed25519ChainKey {
-//     authentication_key: AuthenticationKey,
-// }
+    let s = <String>::deserialize(deserializer)?;
+    s.trim_start_matches("0x")
+        .parse::<T>()
+        .map_err(D::Error::custom)
+}
+
+pub fn deserialize_resource_type<'de, D>(deserializer: D) -> Result<StructTag, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+
+    let s = <String>::deserialize(deserializer)?;
+    parse_struct_tag(&s).map_err(D::Error::custom)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, CandidType)]
+pub struct Account {
+    #[serde(deserialize_with = "deserialize_from_prefixed_hex_string")]
+    pub authentication_key: AuthenticationKey,
+    #[serde(deserialize_with = "deserialize_from_string")]
+    pub sequence_number: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EventHandle {
+    counter: U64,
+    guid: EventHandleGUID,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EventHandleGUID {
+    len_bytes: u8,
+    guid: GUID,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GUID {
+    id: ID,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ID {
+    creation_num: U64,
+    addr: Address,
+}
+
+use aptos_api_types::{
+    X_APTOS_BLOCK_HEIGHT, X_APTOS_CHAIN_ID, X_APTOS_CURSOR, X_APTOS_EPOCH,
+    X_APTOS_LEDGER_OLDEST_VERSION, X_APTOS_LEDGER_TIMESTAMP, X_APTOS_LEDGER_VERSION,
+    X_APTOS_OLDEST_BLOCK_HEIGHT,
+};
+
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, CandidType)]
+pub struct State {
+    pub chain_id: u8,
+    pub epoch: u64,
+    pub version: u64,
+    pub timestamp_usecs: u64,
+    pub oldest_ledger_version: u64,
+    pub oldest_block_height: u64,
+    pub block_height: u64,
+    pub cursor: Option<String>,
+}
+
+impl State {
+    pub fn from_headers(headers: &Vec<HttpHeader>) -> anyhow::Result<Self> {
+        // let mut header_map = std::collections::HashMap::new();
+        // for header in headers {
+        //     header_map.insert(header.name.as_str(), header.value.as_str());
+        // }
+        let header_map: HashMap<_, _> = headers
+            .iter()
+            .map(|h| (h.name.as_str(), h.value.as_str()))
+            .collect();
+
+        let maybe_chain_id = header_map
+            .get(X_APTOS_CHAIN_ID)
+            .and_then(|s| s.parse().ok());
+        let maybe_version = header_map
+            .get(X_APTOS_LEDGER_VERSION)
+            .and_then(|s| s.parse().ok());
+        let maybe_timestamp = header_map
+            .get(X_APTOS_LEDGER_TIMESTAMP)
+            .and_then(|s| s.parse().ok());
+        let maybe_epoch = header_map.get(X_APTOS_EPOCH).and_then(|s| s.parse().ok());
+        let maybe_oldest_ledger_version = header_map
+            .get(X_APTOS_LEDGER_OLDEST_VERSION)
+            .and_then(|s| s.parse().ok());
+        let maybe_block_height = header_map
+            .get(X_APTOS_BLOCK_HEIGHT)
+            .and_then(|s| s.parse().ok());
+        let maybe_oldest_block_height = header_map
+            .get(X_APTOS_OLDEST_BLOCK_HEIGHT)
+            .and_then(|s| s.parse().ok());
+        let cursor = header_map.get(X_APTOS_CURSOR).map(|s| s.to_string());
+
+        let state = if let (
+            Some(chain_id),
+            Some(version),
+            Some(timestamp_usecs),
+            Some(epoch),
+            Some(oldest_ledger_version),
+            Some(block_height),
+            Some(oldest_block_height),
+            cursor,
+        ) = (
+            maybe_chain_id,
+            maybe_version,
+            maybe_timestamp,
+            maybe_epoch,
+            maybe_oldest_ledger_version,
+            maybe_block_height,
+            maybe_oldest_block_height,
+            cursor,
+        ) {
+            Self {
+                chain_id,
+                epoch,
+                version,
+                timestamp_usecs,
+                oldest_ledger_version,
+                block_height,
+                oldest_block_height,
+                cursor,
+            }
+        } else {
+            anyhow::bail!(
+                "Failed to build State from headers due to missing values in response. \
+                Chain ID: {:?}, Version: {:?}, Timestamp: {:?}, Epoch: {:?}, \
+                Oldest Ledger Version: {:?}, Block Height: {:?} Oldest Block Height: {:?}",
+                maybe_chain_id,
+                maybe_version,
+                maybe_timestamp,
+                maybe_epoch,
+                maybe_oldest_ledger_version,
+                maybe_block_height,
+                maybe_oldest_block_height,
+            )
+        };
+
+        Ok(state)
+    }
+}
+
+pub fn parse_state(response: &HttpResponse) -> AptosResult<State> {
+    Ok(State::from_headers(&response.headers)?)
+}
+
+pub fn parse_state_optional(response: &HttpResponse) -> Option<State> {
+    State::from_headers(&response.headers)
+        .map(Some)
+        .unwrap_or(None)
+}
+
+pub fn parse_error(response: HttpResponse) -> RestError {
+    // let status_code: u16 = response.status.into();
+    let status_code: u16 = response.status.to_owned().0.try_into().unwrap_or(500);
+    let maybe_state = parse_state_optional(&response);
+
+    match serde_json::from_slice::<AptosError>(response.body.as_slice()) {
+        Ok(error) => (error, maybe_state, status_code).into(),
+        Err(e) => RestError::Json(e),
+    }
+}

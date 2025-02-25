@@ -68,7 +68,8 @@ pub const CLIENT_SDK_VERSION_HEADER: &str = "client-sdk-version";
 pub const CLIENT_TARGET_API_VERSION_HEADER: &str = "client-target-api-version";
 
 pub const CLIENT_VERSION: &str = "1.38.1";
+pub const APTOS_API_VERSION: &str = "v1";
 
-pub const MAINNET_CHAIN_ID : u8 = 1;
-pub const TESTNET_CHAIN_ID : u8 = 2;
-pub const DEVNET_CHAIN_ID : u8 = 174;
+pub const MAINNET_CHAIN_ID: u8 = 1;
+pub const TESTNET_CHAIN_ID: u8 = 2;
+pub const DEVNET_CHAIN_ID: u8 = 174;

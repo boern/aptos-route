@@ -51,7 +51,7 @@ type Provider = variant {
   Localnet;
 };
 type Result = variant { Ok : text; Err : text };
-type Result_1 = variant { Ok : text; Err : RpcError };
+type Result_1 = variant { Ok : nat64; Err : text };
 type Result_2 = variant { Ok; Err : text };
 type Result_3 = variant { Ok : bool; Err : RpcError };
 type RouteArg = variant { Upgrade : opt UpgradeArgs; Init : InitArgs };
@@ -78,9 +78,9 @@ type RouteConfig = record {
 };
 type RpcError = variant {
   Text : text;
+  HttpCallError : text;
   ParseError : text;
   RpcResponseError : record { code : int64; data : opt text; message : text };
-  RpcRequestError : text;
 };
 type Seqs = record {
   next_directive_seq : nat64;
@@ -128,7 +128,8 @@ service : (RouteArg) -> {
   aptos_route_address : (SnorKeyType) -> (Result);
   aptos_token : (text) -> (opt AptosToken) query;
   forward : () -> (opt text) query;
-  get_account : (text, opt nat64) -> (Result_1);
+  get_account : (text, opt nat64) -> (Result);
+  get_account_balance : (text, opt text) -> (Result_1);
   get_chain_list : () -> (vec Chain) query;
   get_fee_account : () -> (text) query;
   get_gas_budget : () -> (nat64);
@@ -136,8 +137,9 @@ service : (RouteArg) -> {
   get_route_config : () -> (RouteConfig) query;
   get_token : (text) -> (opt Token) query;
   get_token_list : () -> (vec TokenResp) query;
+  get_transaction_by_hash : (text) -> (Result);
   rpc_provider : () -> (Provider) query;
-  transfer_aptos_from_route : (text, nat64, SnorKeyType) -> (Result_1);
+  transfer_aptos_from_route : (text, nat64, SnorKeyType) -> (Result);
   update_aptos_port_info : (AptosPortAction) -> ();
   update_aptos_token : (text, AptosToken) -> (Result_2);
   update_gas_budget : (nat64) -> ();

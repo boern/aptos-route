@@ -66,17 +66,7 @@ export const idlFactory = ({ IDL }) => {
     'module' : IDL.Text,
     'type_tag' : IDL.Text,
   });
-  const RpcError = IDL.Variant({
-    'Text' : IDL.Text,
-    'ParseError' : IDL.Text,
-    'RpcResponseError' : IDL.Record({
-      'code' : IDL.Int64,
-      'data' : IDL.Opt(IDL.Text),
-      'message' : IDL.Text,
-    }),
-    'RpcRequestError' : IDL.Text,
-  });
-  const Result_1 = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : RpcError });
+  const Result_1 = IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text });
   const ChainType = IDL.Variant({
     'SettlementChain' : IDL.Null,
     'ExecutionChain' : IDL.Null,
@@ -141,6 +131,16 @@ export const idlFactory = ({ IDL }) => {
     'symbol' : IDL.Text,
   });
   const Result_2 = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text });
+  const RpcError = IDL.Variant({
+    'Text' : IDL.Text,
+    'HttpCallError' : IDL.Text,
+    'ParseError' : IDL.Text,
+    'RpcResponseError' : IDL.Record({
+      'code' : IDL.Int64,
+      'data' : IDL.Opt(IDL.Text),
+      'message' : IDL.Text,
+    }),
+  });
   const Result_3 = IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : RpcError });
   return IDL.Service({
     'add_token' : IDL.Func([Token], [IDL.Opt(Token)], []),
@@ -148,7 +148,12 @@ export const idlFactory = ({ IDL }) => {
     'aptos_route_address' : IDL.Func([SnorKeyType], [Result], []),
     'aptos_token' : IDL.Func([IDL.Text], [IDL.Opt(AptosToken)], ['query']),
     'forward' : IDL.Func([], [IDL.Opt(IDL.Text)], ['query']),
-    'get_account' : IDL.Func([IDL.Text, IDL.Opt(IDL.Nat64)], [Result_1], []),
+    'get_account' : IDL.Func([IDL.Text, IDL.Opt(IDL.Nat64)], [Result], []),
+    'get_account_balance' : IDL.Func(
+        [IDL.Text, IDL.Opt(IDL.Text)],
+        [Result_1],
+        [],
+      ),
     'get_chain_list' : IDL.Func([], [IDL.Vec(Chain)], ['query']),
     'get_fee_account' : IDL.Func([], [IDL.Text], ['query']),
     'get_gas_budget' : IDL.Func([], [IDL.Nat64], []),
@@ -156,10 +161,11 @@ export const idlFactory = ({ IDL }) => {
     'get_route_config' : IDL.Func([], [RouteConfig], ['query']),
     'get_token' : IDL.Func([IDL.Text], [IDL.Opt(Token)], ['query']),
     'get_token_list' : IDL.Func([], [IDL.Vec(TokenResp)], ['query']),
+    'get_transaction_by_hash' : IDL.Func([IDL.Text], [Result], []),
     'rpc_provider' : IDL.Func([], [Provider], ['query']),
     'transfer_aptos_from_route' : IDL.Func(
         [IDL.Text, IDL.Nat64, SnorKeyType],
-        [Result_1],
+        [Result],
         [],
       ),
     'update_aptos_port_info' : IDL.Func([AptosPortAction], [], []),

@@ -58,8 +58,8 @@ export type Provider = { 'Mainnet' : null } |
   { 'Localnet' : null };
 export type Result = { 'Ok' : string } |
   { 'Err' : string };
-export type Result_1 = { 'Ok' : string } |
-  { 'Err' : RpcError };
+export type Result_1 = { 'Ok' : bigint } |
+  { 'Err' : string };
 export type Result_2 = { 'Ok' : null } |
   { 'Err' : string };
 export type Result_3 = { 'Ok' : boolean } |
@@ -88,6 +88,7 @@ export interface RouteConfig {
   'fee_token_factor' : [] | [bigint],
 }
 export type RpcError = { 'Text' : string } |
+  { 'HttpCallError' : string } |
   { 'ParseError' : string } |
   {
     'RpcResponseError' : {
@@ -95,8 +96,7 @@ export type RpcError = { 'Text' : string } |
       'data' : [] | [string],
       'message' : string,
     }
-  } |
-  { 'RpcRequestError' : string };
+  };
 export interface Seqs {
   'next_directive_seq' : bigint,
   'next_ticket_seq' : bigint,
@@ -142,7 +142,8 @@ export interface _SERVICE {
   'aptos_route_address' : ActorMethod<[SnorKeyType], Result>,
   'aptos_token' : ActorMethod<[string], [] | [AptosToken]>,
   'forward' : ActorMethod<[], [] | [string]>,
-  'get_account' : ActorMethod<[string, [] | [bigint]], Result_1>,
+  'get_account' : ActorMethod<[string, [] | [bigint]], Result>,
+  'get_account_balance' : ActorMethod<[string, [] | [string]], Result_1>,
   'get_chain_list' : ActorMethod<[], Array<Chain>>,
   'get_fee_account' : ActorMethod<[], string>,
   'get_gas_budget' : ActorMethod<[], bigint>,
@@ -150,10 +151,11 @@ export interface _SERVICE {
   'get_route_config' : ActorMethod<[], RouteConfig>,
   'get_token' : ActorMethod<[string], [] | [Token]>,
   'get_token_list' : ActorMethod<[], Array<TokenResp>>,
+  'get_transaction_by_hash' : ActorMethod<[string], Result>,
   'rpc_provider' : ActorMethod<[], Provider>,
   'transfer_aptos_from_route' : ActorMethod<
     [string, bigint, SnorKeyType],
-    Result_1
+    Result
   >,
   'update_aptos_port_info' : ActorMethod<[AptosPortAction], undefined>,
   'update_aptos_token' : ActorMethod<[string, AptosToken], Result_2>,

@@ -31,3 +31,5 @@ bitcoin_customs.wasm
 **/*.crt
 **/*.csr
 **/*.key
+
+.aptos/
