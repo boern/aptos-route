@@ -8,28 +8,27 @@ use std::cell::RefCell;
 
 use crate::ck_eddsa::KeyType;
 use crate::config::RouteConfig;
-// use crate::handler::burn_token::BurnTx;
-// use crate::handler::clear_ticket::ClearTx;
-// use crate::handler::mint_token::MintTokenRequest;
+
+use crate::handler::gen_ticket::GenerateTicketReq;
+use crate::handler::mint_token::MintTokenRequest;
+use crate::state::AptosPort;
 use crate::state::{AptosToken, UpdateTokenStatus};
 use crate::types::Ticket;
 use crate::types::{Chain, Token};
-// use crate::{handler::gen_ticket::GenerateTicketReq, state::UpdateType};
 
 const UPGRADES: MemoryId = MemoryId::new(0);
 const CONFIG: MemoryId = MemoryId::new(1);
 const TOKENS: MemoryId = MemoryId::new(2);
-const SUI_TOKENS_INFO: MemoryId = MemoryId::new(3);
-const UPDATE_TOKENS: MemoryId = MemoryId::new(4);
-const TICKET_QUEUE: MemoryId = MemoryId::new(5);
-const FAILED_TICKETS: MemoryId = MemoryId::new(6);
-const COUNTERPARTIES: MemoryId = MemoryId::new(7);
-const MINT_TOKEN_REQUESTS: MemoryId = MemoryId::new(8);
-const GEN_TICKET_REQS: MemoryId = MemoryId::new(9);
-const SEEDS: MemoryId = MemoryId::new(10);
-const SUI_ADDRESSES: MemoryId = MemoryId::new(11);
-const CLR_TICKET_QUEUE: MemoryId = MemoryId::new(12);
-const BURN_TOKEN: MemoryId = MemoryId::new(13);
+const APTOS_PORTS: MemoryId = MemoryId::new(3);
+const APTOS_TOKENS: MemoryId = MemoryId::new(4);
+const UPDATE_TOKENS: MemoryId = MemoryId::new(5);
+const TICKET_QUEUE: MemoryId = MemoryId::new(6);
+const FAILED_TICKETS: MemoryId = MemoryId::new(7);
+const COUNTERPARTIES: MemoryId = MemoryId::new(8);
+const MINT_TOKEN_REQUESTS: MemoryId = MemoryId::new(9);
+const GEN_TICKET_REQS: MemoryId = MemoryId::new(10);
+const SEEDS: MemoryId = MemoryId::new(11);
+const ROUTE_ADDRESSES: MemoryId = MemoryId::new(12);
 
 type InnerMemory = DefaultMemoryImpl;
 
@@ -87,21 +86,19 @@ pub fn get_seeds_memory() -> Memory {
     with_memory_manager(|m| m.get(SEEDS))
 }
 
-pub fn get_sui_tokens_memory() -> Memory {
-    with_memory_manager(|m| m.get(SUI_TOKENS_INFO))
+pub fn get_aptos_tokens_memory() -> Memory {
+    with_memory_manager(|m| m.get(APTOS_TOKENS))
 }
 
 pub fn get_config_memory() -> Memory {
     with_memory_manager(|m| m.get(CONFIG))
 }
 pub fn get_route_addresses_memory() -> Memory {
-    with_memory_manager(|m| m.get(SUI_ADDRESSES))
+    with_memory_manager(|m| m.get(ROUTE_ADDRESSES))
 }
-pub fn get_clr_ticket_queue_memory() -> Memory {
-    with_memory_manager(|m| m.get(CLR_TICKET_QUEUE))
-}
-pub fn get_burn_tokens_memory() -> Memory {
-    with_memory_manager(|m| m.get(BURN_TOKEN))
+
+pub fn get_aptos_ports_memory() -> Memory {
+    with_memory_manager(|m| m.get(APTOS_PORTS))
 }
 
 pub fn init_ticket_queue() -> StableBTreeMap<u64, Ticket, Memory> {
@@ -120,24 +117,24 @@ pub fn init_tokens() -> StableBTreeMap<String, Token, Memory> {
     StableBTreeMap::init(get_tokens_memory())
 }
 
-// pub fn init_update_tokens() -> StableBTreeMap<UpdateType, UpdateTokenStatus, Memory> {
-//     StableBTreeMap::init(get_update_tokens_memory())
-// }
+pub fn init_update_tokens() -> StableBTreeMap<String, UpdateTokenStatus, Memory> {
+    StableBTreeMap::init(get_update_tokens_memory())
+}
 
-// pub fn init_mint_token_requests() -> StableBTreeMap<String, MintTokenRequest, Memory> {
-//     StableBTreeMap::init(get_mint_token_requests_memory())
-// }
+pub fn init_mint_token_requests() -> StableBTreeMap<String, MintTokenRequest, Memory> {
+    StableBTreeMap::init(get_mint_token_requests_memory())
+}
 
-// pub fn init_gen_ticket_reqs() -> StableBTreeMap<String, GenerateTicketReq, Memory> {
-//     StableBTreeMap::init(get_gen_ticket_req_memory())
-// }
+pub fn init_gen_ticket_reqs() -> StableBTreeMap<String, GenerateTicketReq, Memory> {
+    StableBTreeMap::init(get_gen_ticket_req_memory())
+}
 
 pub fn init_seed() -> StableBTreeMap<String, [u8; 64], Memory> {
     StableBTreeMap::init(get_seeds_memory())
 }
 
-pub fn init_sui_tokens() -> StableBTreeMap<String, AptosToken, Memory> {
-    StableBTreeMap::init(get_sui_tokens_memory())
+pub fn init_aptos_tokens() -> StableBTreeMap<String, AptosToken, Memory> {
+    StableBTreeMap::init(get_aptos_tokens_memory())
 }
 
 pub fn init_config() -> StableCell<RouteConfig, Memory> {
@@ -149,10 +146,6 @@ pub fn init_route_addresses() -> StableBTreeMap<KeyType, Vec<u8>, Memory> {
     StableBTreeMap::init(get_route_addresses_memory())
 }
 
-// pub fn init_clr_ticket_queue() -> StableBTreeMap<String, ClearTx, Memory> {
-//     StableBTreeMap::init(get_clr_ticket_queue_memory())
-// }
-
-// pub fn init_burn_tokens() -> StableBTreeMap<String, BurnTx, Memory> {
-//     StableBTreeMap::init(get_burn_tokens_memory())
-// }
+pub fn init_aptos_ports() -> StableBTreeMap<String, AptosPort, Memory> {
+    StableBTreeMap::init(get_aptos_ports_memory())
+}

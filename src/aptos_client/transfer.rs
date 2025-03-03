@@ -1,7 +1,4 @@
-// Copyright © Aptos Foundation
-// SPDX-License-Identifier: Apache-2.0
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use aptos_types::{
     chain_id::ChainId,
     transaction::{EntryFunction, SignedTransaction, TransactionPayload},
@@ -11,10 +8,7 @@ use move_core_types::{
     identifier::Identifier,
     language_storage::{ModuleId, TypeTag},
 };
-use std::{
-    str::FromStr,
-    // time::{SystemTime, UNIX_EPOCH},
-};
+use std::str::FromStr;
 
 use super::{tx_builder::TransactionBuilder, LocalAccount};
 
@@ -27,12 +21,7 @@ pub async fn get_signed_transfer_txn(
 ) -> Result<SignedTransaction> {
     let options = options.unwrap_or_default();
     use ic_cdk::api;
-
-    // 获取当前时间戳（纳秒）
-    let now_ns = api::time();
-
-    // 转换为秒
-    let now_s = now_ns / 1_000_000_000;
+    let now_s = api::time() / 1_000_000_000;
     let transaction_builder = TransactionBuilder::new(
         TransactionPayload::EntryFunction(EntryFunction::new(
             ModuleId::new(
@@ -46,12 +35,6 @@ pub async fn get_signed_transfer_txn(
                 bcs::to_bytes(&amount).unwrap(),
             ],
         )),
-        // SystemTime::now()
-        //     .duration_since(UNIX_EPOCH)
-        //     .unwrap()
-        //     .as_secs()
-        //     + options.timeout_secs,
-        // 300,
         now_s + options.timeout_secs,
         ChainId::new(chain_id),
     )
@@ -64,16 +47,14 @@ pub async fn get_signed_transfer_txn(
         .await;
     Ok(signed_txn)
 }
+
 pub struct TransferOptions<'a> {
     pub max_gas_amount: u64,
 
     pub gas_unit_price: u64,
 
-    /// This is the number of seconds from now you're willing to wait for the
-    /// transaction to be committed.
     pub timeout_secs: u64,
 
-    /// This is the coin type to transfer.
     pub coin_type: &'a str,
 }
 

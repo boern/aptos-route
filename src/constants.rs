@@ -18,13 +18,18 @@ pub const COIN_MODULE: &str = "coin";
 pub const SUI_COIN: &str = "0x2::sui::SUI";
 pub const DEFAULT_GAS_BUDGET: u64 = 5_000_000;
 //funcs
-pub const MINT_WITH_TICKET_FUNC: &str = "mint_with_ticket";
-pub const MINT_FUNC: &str = "mint";
-pub const BURN_FUNC: &str = "burn";
+pub const CREATE_FUNGIBLE_ASSET: &str = "create_fa";
+// pub const CREATE_FUNGIBLE_ASSET_V2: &str = "create_fa_v2";
+pub const MINT_WITH_TICKET_FUNC: &str = "mint_fa_with_ticket";
+pub const BURN_TOKEN_FUNC: &str = "burn_fa";
+pub const COLLECT_FEE_FUNC: &str = "collect_fee";
+pub const REMOVE_TICKET_FUNC: &str = "remove_ticket";
+pub const UPDATE_META_FUNC: &str = "mutate_metadata";
 pub const UPDATE_NAME_FUNC: &str = "update_name";
 pub const UPDATE_SYMBOL_FUNC: &str = "update_symbol";
-pub const UPDATE_ICON_FUNC: &str = "update_icon_url";
-pub const UPDATE_DESC_FUNC: &str = "update_description";
+pub const UPDATE_ICON_FUNC: &str = "update_icon";
+pub const UPDATE_DESC_FUNC: &str = "update_project_uri";
+pub const GET_FA_OBJ: &str = "get_fa_obj";
 // 1  MIST = 0.000_000_001 SUI.
 // 1 SUI =1_000_000_000 MIST
 

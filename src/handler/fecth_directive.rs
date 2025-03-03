@@ -1,4 +1,5 @@
 #![allow(unused)]
+use crate::aptos_client::UpdateMetaReq;
 use crate::constants::DIRECTIVE_LIMIT_SIZE;
 
 use crate::config::{mutate_config, read_config};
@@ -40,29 +41,28 @@ pub async fn query_directives() {
                                     current_token,update_token
                                 );
 
-                                if !current_token.name.eq(&update_token.name) {
-                                    let update_type =
-                                        UpdateType::Name(update_token.name.to_owned());
-                                    let update_status =
-                                        UpdateTokenStatus::new(update_token.token_id.to_owned());
+                                if !current_token.name.eq(&update_token.name)
+                                    || !current_token.symbol.eq(&update_token.symbol)
+                                    || !current_token.icon.eq(&update_token.icon)
+                                {
+                                    let aptos_token =
+                                        read_state(|s| s.atptos_tokens.get(&update_token.token_id))
+                                            .expect("aptos token is None");
+                                    let req = UpdateMetaReq {
+                                        fa_obj: aptos_token.fa_obj_id.expect("fa obj id is None"),
+                                        name: Some(update_token.name.to_owned()),
+                                        symbol: Some(update_token.symbol.to_owned()),
+                                        decimals: None,
+                                        icon_uri: update_token.icon.to_owned(),
+                                        project_uri: None,
+                                    };
+                                    let update_status = UpdateTokenStatus::new(
+                                        update_token.token_id.to_owned(),
+                                        req,
+                                    );
                                     mutate_state(|s| {
-                                        s.update_token_queue.insert(update_type, update_status)
-                                    });
-                                } else if !current_token.symbol.eq(&update_token.symbol) {
-                                    let update_type =
-                                        UpdateType::Symbol(update_token.symbol.to_owned());
-                                    let update_status =
-                                        UpdateTokenStatus::new(update_token.token_id.to_owned());
-                                    mutate_state(|s| {
-                                        s.update_token_queue.insert(update_type, update_status)
-                                    });
-                                } else if !current_token.icon.eq(&update_token.icon) {
-                                    let update_type =
-                                        UpdateType::Icon(update_token.icon.to_owned().unwrap());
-                                    let update_status =
-                                        UpdateTokenStatus::new(update_token.token_id.to_owned());
-                                    mutate_state(|s| {
-                                        s.update_token_queue.insert(update_type, update_status)
+                                        s.update_token_queue
+                                            .insert(update_token.token_id.to_owned(), update_status)
                                     });
                                 } else {
                                     mutate_state(|s| s.add_token(update_token.to_owned()));

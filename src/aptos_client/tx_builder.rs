@@ -1,26 +1,36 @@
-// Copyright © Aptos Foundation
-// Parts of the project are originally copyright © Meta Platforms, Inc.
-// SPDX-License-Identifier: Apache-2.0
 
-// use crate::types::{
-//     transaction::{authenticator::AuthenticationKey, RawTransaction, TransactionPayload},
+use std::str::FromStr;
 
-// };
-// pub use aptos_cached_packages::aptos_stdlib;
+
 use aptos_global_constants::{GAS_UNIT_PRICE, MAX_GAS_AMOUNT};
-// use aptos_crypto::{ed25519::Ed25519PublicKey, HashValue};
-// use aptos_types::transaction::{EntryFunction, Script};
 
+use ic_canister_log::log;
+
+use crate::{
+    config::read_config,
+    constants::{
+        BURN_TOKEN_FUNC, COLLECT_FEE_FUNC, CREATE_FUNGIBLE_ASSET, 
+        MINT_WITH_TICKET_FUNC, REMOVE_TICKET_FUNC, UPDATE_META_FUNC,
+    },
+    ic_log::DEBUG,
+    state::read_state,
+};
+use anyhow::Result;
 use aptos_cached_packages::aptos_stdlib;
-use aptos_crypto::ed25519::PublicKey;
+
 use aptos_types::{
     chain_id::ChainId,
     transaction::{
         script::{EntryFunction, Script},
-        RawTransaction, TransactionPayload,
+        RawTransaction, SignedTransaction, TransactionPayload,
     },
 };
-use move_core_types::account_address::AccountAddress;
+use ic_cdk::api;
+use move_core_types::{
+    account_address::AccountAddress, identifier::Identifier, language_storage::ModuleId,
+};
+
+use super::{ LocalAccount, TxOptions, TxReq};
 
 pub struct TransactionBuilder {
     sender: Option<AccountAddress>,
@@ -157,23 +167,6 @@ impl TransactionFactory {
         self.payload(TransactionPayload::EntryFunction(func))
     }
 
-    // pub fn create_user_account(&self, public_key: &Ed25519PublicKey) -> TransactionBuilder {
-    //     self.payload(aptos_stdlib::aptos_account_create_account(
-    //         AuthenticationKey::ed25519(public_key).account_address(),
-    //     ))
-    // }
-
-    // pub fn implicitly_create_user_account_and_transfer(
-    //     &self,
-    //     public_key: &Ed25519PublicKey,
-    //     amount: u64,
-    // ) -> TransactionBuilder {
-    //     self.payload(aptos_stdlib::aptos_account_transfer(
-    //         AuthenticationKey::ed25519(public_key).account_address(),
-    //         amount,
-    //     ))
-    // }
-
     pub fn transfer(&self, to: AccountAddress, amount: u64) -> TransactionBuilder {
         self.payload(aptos_stdlib::aptos_coin_transfer(to, amount))
     }
@@ -183,10 +176,6 @@ impl TransactionFactory {
             aptos_cached_packages::aptos_framework_sdk_builder::aptos_account_transfer(to, amount),
         )
     }
-
-    //
-    // Internal Helpers
-    //
 
     pub fn script(&self, script: Script) -> TransactionBuilder {
         self.payload(TransactionPayload::Script(script))
@@ -211,4 +200,120 @@ impl TransactionFactory {
             .as_secs()
             + self.transaction_expiration_time
     }
+}
+
+pub async fn get_signed_tx(
+    from_account: &mut LocalAccount,
+    req: TxReq,
+    options: Option<TxOptions>,
+) -> Result<SignedTransaction> {
+    let (func_id, type_args, args) = match req {
+        TxReq::CreateToken(req) => {
+            let func_id = Identifier::new(CREATE_FUNGIBLE_ASSET)?;
+            let type_args = vec![];
+            let args = vec![
+                bcs::to_bytes(&req.token_id)?,
+                bcs::to_bytes(&req.name)?,
+                bcs::to_bytes(&req.symbol)?,
+                bcs::to_bytes(&req.decimals)?,
+                bcs::to_bytes(&req.icon_uri)?,
+                bcs::to_bytes(&req.max_supply)?,
+                bcs::to_bytes(&req.project_uri)?,
+            ];
+            (func_id, type_args, args)
+        }
+        TxReq::UpdateMeta(req) => {
+            let func_id = Identifier::new(UPDATE_META_FUNC)?;
+            let type_args = vec![];
+            let fa_obj = AccountAddress::from_str(&req.fa_obj)?;
+            let args = vec![
+                bcs::to_bytes(&fa_obj)?,
+                bcs::to_bytes(&req.name)?,
+                bcs::to_bytes(&req.symbol)?,
+                bcs::to_bytes(&req.decimals)?,
+                bcs::to_bytes(&req.icon_uri)?,
+                bcs::to_bytes(&req.project_uri)?,
+            ];
+            (func_id, type_args, args)
+        }
+        TxReq::MintToken(req) => {
+            let func_id = Identifier::new(MINT_WITH_TICKET_FUNC)?;
+            let type_args = vec![];
+            let fa_obj = AccountAddress::from_str(&req.fa_obj)?;
+            let recipient = AccountAddress::from_str(&req.recipient)?;
+            let args = vec![
+                bcs::to_bytes(&req.ticket_id)?,
+                bcs::to_bytes(&fa_obj)?,
+                bcs::to_bytes(&recipient)?,
+                bcs::to_bytes(&req.mint_acmount)?,
+            ];
+            (func_id, type_args, args)
+        }
+        TxReq::BurnToken(req) => {
+            let func_id = Identifier::new(BURN_TOKEN_FUNC)?;
+            let type_args = vec![];
+            let fa_obj = AccountAddress::from_str(&req.fa_obj)?;
+            let args = vec![
+                bcs::to_bytes(&fa_obj)?,
+                bcs::to_bytes(&req.burn_acmount)?,
+                bcs::to_bytes(&req.memo)?,
+            ];
+            (func_id, type_args, args)
+        }
+        TxReq::CollectFee(fee_amount) => {
+            let func_id = Identifier::new(COLLECT_FEE_FUNC)?;
+            let type_args = vec![];
+            let args = vec![bcs::to_bytes(&fee_amount)?];
+            (func_id, type_args, args)
+        }
+        TxReq::RemoveTicket(ticket_id) => {
+            let func_id = Identifier::new(REMOVE_TICKET_FUNC)?;
+            let type_args = vec![];
+            let args = vec![bcs::to_bytes(&ticket_id)?];
+            (func_id, type_args, args)
+        }
+    };
+    log!(
+        DEBUG,
+        "[tx_builder::get_signed_tx] func_id: {:?}, type_args:{:?}, args:{:?} ",
+        func_id,
+        type_args,
+        args
+    );
+
+    let options = options.unwrap_or_default();
+    let current_package =
+        read_config(|c| c.get().current_port_package.to_owned()).expect("port package is none!");
+    let port_address = AccountAddress::from_str(&current_package)?;
+    let port_info =
+        read_state(|s| s.aptos_ports.get(&current_package)).expect("port info is none!");
+    let module_id = Identifier::new(port_info.module)?;
+
+    // get current timestamp and conver to second
+    let now_s = api::time() / 1_000_000_000;
+
+    let seq_num = from_account.update_seq_from_chain().await?;
+    log!(
+        DEBUG,
+        "[tx_builder::get_signed_tx] latest seq number: {} ",
+        seq_num
+    );
+    let transaction_builder = TransactionBuilder::new(
+        TransactionPayload::EntryFunction(EntryFunction::new(
+            ModuleId::new(port_address, module_id),
+            func_id,
+            type_args,
+            args,
+        )),
+        now_s + options.timeout_secs,
+        ChainId::new(options.chain_id),
+    )
+    .sender(from_account.address())
+    .sequence_number(from_account.sequence_number())
+    .max_gas_amount(options.max_gas_amount)
+    .gas_unit_price(options.gas_unit_price);
+    let signed_txn = from_account
+        .sign_with_transaction_builder(transaction_builder)
+        .await;
+    Ok(signed_txn)
 }

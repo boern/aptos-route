@@ -5,7 +5,7 @@ use crate::ic_log::DEBUG;
 use crate::state::{mutate_state, read_state};
 
 use aptos_crypto::ed25519::{Ed25519PrivateKey, Ed25519PublicKey};
-use bip32::Seed;
+
 use candid::Principal;
 use candid::{CandidType, Deserialize};
 use ic_canister_log::log;
@@ -131,20 +131,6 @@ fn native_public_key_ed25519(seed: Vec<u8>) -> Vec<u8> {
     let private_key = Ed25519PrivateKey::try_from(&seed_32_bytes[..]).unwrap();
     let public_key = Ed25519PublicKey::from(&private_key);
     public_key.to_bytes().to_vec()
-}
-
-fn derivation_path_ed25519(
-    canister_id: &Principal,
-    derivation_path: &Vec<ByteBuf>,
-) -> ic_crypto_ed25519::DerivationPath {
-    let mut path = vec![];
-    let derivation_index = ic_crypto_ed25519::DerivationIndex(canister_id.as_slice().to_vec());
-    path.push(derivation_index);
-
-    for index in derivation_path {
-        path.push(ic_crypto_ed25519::DerivationIndex(index.to_vec()));
-    }
-    ic_crypto_ed25519::DerivationPath::new(path)
 }
 
 /// Signs a message with an ed25519 key.

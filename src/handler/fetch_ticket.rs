@@ -4,8 +4,9 @@ use std::str::FromStr;
 use crate::config::{mutate_config, read_config};
 use crate::constants::TICKET_LIMIT_SIZE;
 use crate::ic_log::ERROR;
-use crate::ic_sui::sui_types::base_types::SuiAddress;
+
 use crate::types::{ChainId, ChainState, Error, Seq, Ticket};
+use aptos_types::account_address::AccountAddress;
 use candid::Principal;
 
 use crate::{
@@ -27,7 +28,7 @@ pub async fn query_tickets() {
         Ok(tickets) => {
             let mut next_seq = offset;
             for (seq, ticket) in &tickets {
-                if let Err(e) = SuiAddress::from_str(&ticket.receiver) {
+                if let Err(e) = AccountAddress::from_str(&ticket.receiver) {
                     log!(
                         ERROR,
                         "[fetch_ticket::query_tickets] failed to parse ticket receiver: {}, error:{}",

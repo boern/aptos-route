@@ -36,6 +36,14 @@ export const idlFactory = ({ IDL }) => {
     'Upgrade' : IDL.Opt(UpgradeArgs),
     'Init' : InitArgs,
   });
+  const AptosPort = IDL.Record({
+    'port_owner' : IDL.Text,
+    'package' : IDL.Text,
+    'fee_addr' : IDL.Text,
+    'functions' : IDL.Vec(IDL.Text),
+    'module' : IDL.Text,
+    'aptos_route' : IDL.Text,
+  });
   const Token = IDL.Record({
     'decimals' : IDL.Nat8,
     'token_id' : IDL.Text,
@@ -44,27 +52,23 @@ export const idlFactory = ({ IDL }) => {
     'name' : IDL.Text,
     'symbol' : IDL.Text,
   });
-  const AptosPortAction = IDL.Record({
-    'package' : IDL.Text,
-    'upgrade_cap' : IDL.Text,
-    'ticket_table' : IDL.Text,
-    'port_owner_cap' : IDL.Text,
-    'functions' : IDL.Vec(IDL.Text),
-    'module' : IDL.Text,
-  });
   const SnorKeyType = IDL.Variant({
     'Native' : IDL.Null,
     'ChainKey' : IDL.Null,
   });
   const Result = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
+  const TxStatus = IDL.Variant({
+    'New' : IDL.Null,
+    'Finalized' : IDL.Null,
+    'TxFailed' : IDL.Record({ 'e' : IDL.Text }),
+    'Pending' : IDL.Null,
+  });
   const AptosToken = IDL.Record({
-    'treasury_cap' : IDL.Text,
-    'metadata' : IDL.Text,
-    'package' : IDL.Text,
-    'upgrade_cap' : IDL.Text,
-    'functions' : IDL.Vec(IDL.Text),
-    'module' : IDL.Text,
-    'type_tag' : IDL.Text,
+    'status' : TxStatus,
+    'fa_obj_id' : IDL.Opt(IDL.Text),
+    'type_tag' : IDL.Opt(IDL.Text),
+    'tx_hash' : IDL.Opt(IDL.Text),
+    'retry' : IDL.Nat64,
   });
   const Result_1 = IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text });
   const ChainType = IDL.Variant({
@@ -80,11 +84,10 @@ export const idlFactory = ({ IDL }) => {
     'chain_type' : ChainType,
     'contract_address' : IDL.Opt(IDL.Text),
   });
+  const Result_2 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Text), 'Err' : IDL.Text });
   const Permission = IDL.Variant({ 'Update' : IDL.Null, 'Query' : IDL.Null });
   const TaskType = IDL.Variant({
     'GetTickets' : IDL.Null,
-    'ClearTicket' : IDL.Null,
-    'BurnToken' : IDL.Null,
     'GetDirectives' : IDL.Null,
     'MintToken' : IDL.Null,
     'UpdateToken' : IDL.Null,
@@ -102,8 +105,13 @@ export const idlFactory = ({ IDL }) => {
     'Native' : IDL.Vec(IDL.Nat8),
     'ChainKey' : IDL.Null,
   });
+  const TxOptions = IDL.Record({
+    'max_gas_amount' : IDL.Nat64,
+    'chain_id' : IDL.Nat8,
+    'gas_unit_price' : IDL.Nat64,
+    'timeout_secs' : IDL.Nat64,
+  });
   const RouteConfig = IDL.Record({
-    'sui_port_action' : AptosPortAction,
     'admin' : IDL.Principal,
     'hub_principal' : IDL.Principal,
     'caller_perms' : IDL.Vec(IDL.Tuple(IDL.Text, Permission)),
@@ -113,12 +121,14 @@ export const idlFactory = ({ IDL }) => {
     'fee_account' : IDL.Text,
     'seqs' : Seqs,
     'rpc_provider' : Provider,
+    'current_port_package' : IDL.Opt(IDL.Text),
     'chain_id' : IDL.Text,
     'schnorr_key_name' : IDL.Text,
     'target_chain_factor' : IDL.Vec(IDL.Tuple(IDL.Text, IDL.Nat)),
     'multi_rpc_config' : MultiRpcConfig,
     'key_type' : KeyType,
     'chain_state' : ChainState,
+    'tx_opt' : TxOptions,
     'forward' : IDL.Opt(IDL.Text),
     'nodes_in_subnet' : IDL.Nat32,
     'fee_token_factor' : IDL.Opt(IDL.Nat),
@@ -130,21 +140,47 @@ export const idlFactory = ({ IDL }) => {
     'rune_id' : IDL.Opt(IDL.Text),
     'symbol' : IDL.Text,
   });
-  const Result_2 = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text });
-  const RpcError = IDL.Variant({
-    'Text' : IDL.Text,
-    'HttpCallError' : IDL.Text,
-    'ParseError' : IDL.Text,
-    'RpcResponseError' : IDL.Record({
-      'code' : IDL.Int64,
-      'data' : IDL.Opt(IDL.Text),
-      'message' : IDL.Text,
-    }),
+  const CreateTokenReq = IDL.Record({
+    'decimals' : IDL.Nat8,
+    'token_id' : IDL.Text,
+    'project_uri' : IDL.Text,
+    'name' : IDL.Text,
+    'icon_uri' : IDL.Text,
+    'max_supply' : IDL.Opt(IDL.Nat),
+    'symbol' : IDL.Text,
   });
-  const Result_3 = IDL.Variant({ 'Ok' : IDL.Bool, 'Err' : RpcError });
+  const BurnTokenReq = IDL.Record({
+    'memo' : IDL.Opt(IDL.Text),
+    'fa_obj' : IDL.Text,
+    'burn_acmount' : IDL.Nat64,
+  });
+  const MintTokenReq = IDL.Record({
+    'recipient' : IDL.Text,
+    'ticket_id' : IDL.Text,
+    'mint_acmount' : IDL.Nat64,
+    'fa_obj' : IDL.Text,
+  });
+  const UpdateMetaReq = IDL.Record({
+    'decimals' : IDL.Opt(IDL.Nat8),
+    'project_uri' : IDL.Opt(IDL.Text),
+    'name' : IDL.Opt(IDL.Text),
+    'icon_uri' : IDL.Opt(IDL.Text),
+    'fa_obj' : IDL.Text,
+    'symbol' : IDL.Opt(IDL.Text),
+  });
+  const TxReq = IDL.Variant({
+    'CreateToken' : CreateTokenReq,
+    'CollectFee' : IDL.Nat64,
+    'RemoveTicket' : IDL.Text,
+    'BurnToken' : BurnTokenReq,
+    'MintToken' : MintTokenReq,
+    'UpdateMeta' : UpdateMetaReq,
+  });
+  const Result_3 = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text });
   return IDL.Service({
+    'add_aptos_port' : IDL.Func([AptosPort], [], []),
     'add_token' : IDL.Func([Token], [IDL.Opt(Token)], []),
-    'aptos_port_info' : IDL.Func([], [AptosPortAction], ['query']),
+    'aptos_ports' : IDL.Func([], [IDL.Vec(AptosPort)], ['query']),
     'aptos_route_address' : IDL.Func([SnorKeyType], [Result], []),
     'aptos_token' : IDL.Func([IDL.Text], [IDL.Opt(AptosToken)], ['query']),
     'forward' : IDL.Func([], [IDL.Opt(IDL.Text)], ['query']),
@@ -155,6 +191,7 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'get_chain_list' : IDL.Func([], [IDL.Vec(Chain)], ['query']),
+    'get_fa_obj_from_port' : IDL.Func([IDL.Text, IDL.Text], [Result_2], []),
     'get_fee_account' : IDL.Func([], [IDL.Text], ['query']),
     'get_gas_budget' : IDL.Func([], [IDL.Nat64], []),
     'get_redeem_fee' : IDL.Func([IDL.Text], [IDL.Opt(IDL.Nat)], ['query']),
@@ -163,16 +200,17 @@ export const idlFactory = ({ IDL }) => {
     'get_token_list' : IDL.Func([], [IDL.Vec(TokenResp)], ['query']),
     'get_transaction_by_hash' : IDL.Func([IDL.Text], [Result], []),
     'rpc_provider' : IDL.Func([], [Provider], ['query']),
-    'transfer_aptos_from_route' : IDL.Func(
+    'submit_tx' : IDL.Func([TxReq], [Result], []),
+    'transfer_aptos' : IDL.Func(
         [IDL.Text, IDL.Nat64, SnorKeyType],
         [Result],
         [],
       ),
-    'update_aptos_port_info' : IDL.Func([AptosPortAction], [], []),
-    'update_aptos_token' : IDL.Func([IDL.Text, AptosToken], [Result_2], []),
+    'update_aptos_token' : IDL.Func([IDL.Text, AptosToken], [Result_3], []),
     'update_gas_budget' : IDL.Func([IDL.Nat64], [], []),
+    'update_port_package' : IDL.Func([IDL.Text], [], []),
     'update_rpc_provider' : IDL.Func([Provider], [], []),
-    'verfy_txn' : IDL.Func([IDL.Text, IDL.Nat64, SnorKeyType], [Result_3], []),
+    'update_tx_option' : IDL.Func([TxOptions], [], []),
   });
 };
 export const init = ({ IDL }) => {

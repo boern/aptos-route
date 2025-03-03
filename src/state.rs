@@ -1,6 +1,10 @@
 #![allow(unused)]
+use crate::aptos_client::UpdateMetaReq;
 use crate::ck_eddsa::KeyType;
 use crate::config::{mutate_config, read_config, RouteConfig};
+
+use crate::handler::gen_ticket::GenerateTicketReq;
+use crate::handler::mint_token::MintTokenRequest;
 // use crate::handler::burn_token::BurnTx;
 // use crate::handler::clear_ticket::ClearTx;
 // use crate::handler::gen_ticket::GenerateTicketReq;
@@ -16,6 +20,7 @@ use ic_stable_structures::storable::Bound;
 use ic_stable_structures::Storable;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use std::default;
 use std::{cell::RefCell, collections::HashSet};
 
 pub type CanisterId = Principal;
@@ -73,9 +78,10 @@ impl Storable for UpdateType {
 
 #[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
 pub struct UpdateTokenStatus {
-    pub token_id: TokenId,
+    pub token_id: String,
+    pub req: UpdateMetaReq,
     pub retry: u64,
-    pub degist: Option<String>,
+    pub tx_hash: Option<String>,
     pub status: TxStatus,
 }
 
@@ -93,12 +99,12 @@ impl Storable for UpdateTokenStatus {
 }
 
 impl UpdateTokenStatus {
-    pub fn new(token_id: TokenId) -> Self {
+    pub fn new(token_id: TokenId, req: UpdateMetaReq) -> Self {
         Self {
             token_id,
-            // update_type,
+            req,
             retry: 0,
-            degist: None,
+            tx_hash: None,
             status: TxStatus::New,
         }
     }
@@ -125,15 +131,48 @@ impl From<Token> for TokenResp {
     }
 }
 
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AptosToken {
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct AptosPort {
     pub package: String,
     pub module: String,
     pub functions: HashSet<String>,
-    pub treasury_cap: String,
-    pub metadata: String,
-    pub type_tag: String,
-    pub upgrade_cap: String,
+    pub port_owner: String,
+    pub aptos_route: String,
+    pub fee_addr: String,
+}
+
+impl Storable for AptosPort {
+    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+        let bytes = bincode::serialize(&self).expect("failed to serialize SuiPortAction");
+        Cow::Owned(bytes)
+    }
+
+    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
+        bincode::deserialize(bytes.as_ref()).expect("failed to deserialize SuiPortAction")
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AptosToken {
+    pub fa_obj_id: Option<String>,
+    pub type_tag: Option<String>,
+    pub retry: u64,
+    pub tx_hash: Option<String>,
+    pub status: TxStatus,
+}
+
+impl Default for AptosToken {
+    fn default() -> Self {
+        Self {
+            fa_obj_id: None,
+            type_tag: None,
+            retry: 0,
+            tx_hash: None,
+            status: TxStatus::New,
+        }
+    }
 }
 
 impl Storable for AptosToken {
@@ -152,8 +191,6 @@ impl Storable for AptosToken {
 #[derive(Deserialize, Serialize)]
 pub struct RouteState {
     // stable storage
-    // #[serde(skip, default = "crate::memory::init_config")]
-    // pub route_config: StableCell<SuiRouteConfig, Memory>,
     #[serde(skip, default = "crate::memory::init_ticket_queue")]
     pub tickets_queue: StableBTreeMap<u64, Ticket, Memory>,
     #[serde(skip, default = "crate::memory::init_failed_tickets")]
@@ -162,22 +199,21 @@ pub struct RouteState {
     pub counterparties: StableBTreeMap<ChainId, Chain, Memory>,
     #[serde(skip, default = "crate::memory::init_tokens")]
     pub tokens: StableBTreeMap<TokenId, Token, Memory>,
-    #[serde(skip, default = "crate::memory::init_sui_tokens")]
-    pub sui_tokens: StableBTreeMap<TokenId, AptosToken, Memory>,
-    // #[serde(skip, default = "crate::memory::init_update_tokens")]
-    // pub update_token_queue: StableBTreeMap<UpdateType, UpdateTokenStatus, Memory>,
-    // #[serde(skip, default = "crate::memory::init_mint_token_requests")]
-    // pub mint_token_requests: StableBTreeMap<TicketId, MintTokenRequest, Memory>,
-    // #[serde(skip, default = "crate::memory::init_gen_ticket_reqs")]
-    // pub gen_ticket_reqs: StableBTreeMap<TicketId, GenerateTicketReq, Memory>,
+
+    #[serde(skip, default = "crate::memory::init_update_tokens")]
+    pub update_token_queue: StableBTreeMap<TicketId, UpdateTokenStatus, Memory>,
+    #[serde(skip, default = "crate::memory::init_mint_token_requests")]
+    pub mint_token_requests: StableBTreeMap<TicketId, MintTokenRequest, Memory>,
+    #[serde(skip, default = "crate::memory::init_gen_ticket_reqs")]
+    pub gen_ticket_reqs: StableBTreeMap<TicketId, GenerateTicketReq, Memory>,
     #[serde(skip, default = "crate::memory::init_seed")]
     pub seeds: StableBTreeMap<String, [u8; 64], Memory>,
     #[serde(skip, default = "crate::memory::init_route_addresses")]
     pub route_addresses: StableBTreeMap<KeyType, Vec<u8>, Memory>,
-    // #[serde(skip, default = "crate::memory::init_clr_ticket_queue")]
-    // pub clr_ticket_queue: StableBTreeMap<String, ClearTx, Memory>,
-    // #[serde(skip, default = "crate::memory::init_burn_tokens")]
-    // pub burn_tokens: StableBTreeMap<String, BurnTx, Memory>,
+    #[serde(skip, default = "crate::memory::init_aptos_ports")]
+    pub aptos_ports: StableBTreeMap<String, AptosPort, Memory>,
+    #[serde(skip, default = "crate::memory::init_aptos_tokens")]
+    pub atptos_tokens: StableBTreeMap<TokenId, AptosToken, Memory>,
 }
 
 impl RouteState {
@@ -187,16 +223,16 @@ impl RouteState {
             tickets_failed_to_hub: StableBTreeMap::init(crate::memory::get_failed_tickets_memory()),
             counterparties: StableBTreeMap::init(crate::memory::get_counterparties_memory()),
             tokens: StableBTreeMap::init(crate::memory::get_tokens_memory()),
-            sui_tokens: StableBTreeMap::init(crate::memory::get_sui_tokens_memory()),
-            // update_token_queue: StableBTreeMap::init(crate::memory::get_update_tokens_memory()),
-            // mint_token_requests: StableBTreeMap::init(
-            //     crate::memory::get_mint_token_requests_memory(),
-            // ),
-            // gen_ticket_reqs: StableBTreeMap::init(crate::memory::get_gen_ticket_req_memory()),
+
+            update_token_queue: StableBTreeMap::init(crate::memory::get_update_tokens_memory()),
+            mint_token_requests: StableBTreeMap::init(
+                crate::memory::get_mint_token_requests_memory(),
+            ),
+            gen_ticket_reqs: StableBTreeMap::init(crate::memory::get_gen_ticket_req_memory()),
             seeds: StableBTreeMap::init(crate::memory::get_seeds_memory()),
             route_addresses: StableBTreeMap::init(crate::memory::get_route_addresses_memory()),
-            // clr_ticket_queue: StableBTreeMap::init(crate::memory::get_clr_ticket_queue_memory()),
-            // burn_tokens: StableBTreeMap::init(crate::memory::get_burn_tokens_memory()),
+            aptos_ports: StableBTreeMap::init(crate::memory::get_aptos_ports_memory()),
+            atptos_tokens: StableBTreeMap::init(crate::memory::get_aptos_tokens_memory()),
         }
     }
     pub fn add_chain(&mut self, chain: Chain) {
@@ -223,10 +259,6 @@ impl RouteState {
                 .insert(chain.chain_id.to_string(), chain.to_owned());
         }
     }
-
-    // pub fn update_mint_token_req(&mut self, ticket_id: String, req: MintTokenRequest) {
-    //     self.mint_token_requests.insert(ticket_id, req);
-    // }
 }
 
 pub fn take_state<F, R>(f: F) -> R

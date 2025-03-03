@@ -10,26 +10,20 @@ dfx canister call aptos_route get_route_config '()' --network $NETWORK
 # NETWORK=http://localhost:12345/
 # NETWORK=ic
 # get aptos_route_address and init it
-# KEYTYPE="variant { Native }"
-KEYTYPE="variant { ChainKey }"
+KEYTYPE="variant { Native }"
+# KEYTYPE="variant { ChainKey }"
 # dfx canister call aptos_route aptos_route_address "($KEYTYPE)" --network $NETWORK 
 aptos_route_address=$(dfx canister call aptos_route aptos_route_address "($KEYTYPE)" --network $NETWORK)
 aptos_route_address=$(echo "$aptos_route_address" | awk -F'"' '{print $2}' | tr -d '[:space:]')
 echo "aptos_route_address: $aptos_route_address"
+
+# create a default profile 
+aptso init 
 # requrie faucet
 faucet_amount=200000000
 aptos account fund-with-faucet --account $aptos_route_address --amount $faucet_amount
 
-# get account info
-curl --request GET \
-  --url https://api.devnet.aptoslabs.com/v1/accounts/${aptos_route_address} \
-  --header 'Accept: application/json' | jq
-# get account balance
-asset_type="0x1::aptos_coin::AptosCoin"
-curl --request GET \
-  --url https://api.devnet.aptoslabs.com/v1/accounts/$aptos_route_address/balance/${asset_type} \
-  --header 'Accept: application/json' | jq
-
+aptos account balance --account $aptos_route_address --profile default
 
 # get account from canister 
 address=$aptos_route_address
@@ -37,14 +31,18 @@ address=$aptos_route_address
 dfx canister call aptos_route get_account "(\"${address}\",null)" --network $NETWORK
 
 address=$aptos_route_address
-address="0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d"
-asset_type="0x1::aptos_coin::AptosCoin"
 dfx canister call aptos_route get_account_balance "(\"${address}\",null)" --network $NETWORK
+
+address="0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8"
+# asset_type="0x1::aptos_coin::AptosCoin"
+asset_type="0x1::fungible_asset::Metadata"
+dfx canister call aptos_route get_account_balance "(\"${address}\",\"${asset_type}\")" --network $NETWORK
 
 
 dfx canister call aptos_route seqs '()' --network $NETWORK
 
-dfx canister call aptos_route update_seqs '( record {next_ticket_seq=0:nat64; next_directive_seq=0:nat64; tx_seq=1:nat64})' --network $NETWORK
+dfx canister call aptos_route update_seqs '( record {next_ticket_seq=0:nat64; next_directive_seq=0:nat64; tx_seq=2:nat64})' --network $NETWORK
+
 # dfx canister call aptos_route update_seqs '( record={0;0;0})' --network $NETWORK
 # transfer apto from route to recipent
 recipient="0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8"
@@ -59,159 +57,298 @@ txn_hash="0x169238641c3f97f2bc0b4a46707faf12457de857015f0882c6b2635e17486e4a"
 dfx canister call aptos_route get_transaction_by_hash "(\"${txn_hash}\")" --network $NETWORK
 
 
-# transfer aptos to init signer
-# 1  MIST = 0.000_000_001 aptos.
-# 1 aptos =1_000_000_000 MIST
-# AMOUNT=500000000
-coin_amount=800000000
-aptos client ptb \
-  --assign recipient @$aptos_route_address \
-  --assign coin_amount $coin_amount \
-  --split-coins gas [coin_amount] \
-  --assign coins \
-  --transfer-objects [coins.0] recipient \
-  --gas-budget 50000000 \
-  --dry-run
+# set route address on port
+aptos_port_addr=0x933707720e4def37d4a69c0f83366a6c5bc7fc6309891a60d4013777cdb81fc7
+aptos_route_address=0xcf56359a741035f960f82d3cc0454cbb228885d19b822fa6b610e450826fe097
+module_id=aptos_port
+# func_id=set_route_address
+aptos move run --function-id $aptos_port_addr::$module_id::set_route_address --args \
+address:${aptos_route_address} \
+--profile omnity-devnet
+# check
+aptos move view --function-id $aptos_port_addr::$module_id::get_route --profile omnity-devnet
 
-gas_obj_id=0x98f3fddb83a23866c7d2c3ffed636e77a18bdff8dea50a719efa3233a28c8a96
-active_address=$(aptos client active-address)
-echo "transfer aptos to $aptos_route_address from $active_address"
-aptos client transfer-aptos --to $aptos_route_address --aptos-coin-object-id $gas_obj_id --gas-budget 5000000
-# check balance
-echo aptos route address balance: 
-aptos client gas $aptos_route_address
+# update fee address on route
+fee_account=$aptos_route_address
+dfx canister call aptos_route update_fee_account "(\"${fee_account}\")" --network $NETWORK
 
-# test: query info from aptos chain via aptos route
-dfx canister call aptos_route get_gas_price '()' --network $NETWORK
+dfx canister call aptos_route get_fee_account "(\"${fee_account}\")" --network $NETWORK
 
-# owner=${aptos_route_address}
-# owner=0x365eb9f54539cf07332773f756a392d5af507b3b8990f84e52ee6f6b6b57534b
-coin_type="0x2::aptos::aptos"
-dfx canister call aptos_route get_balance "(\"${aptos_route_address}\",opt \"${coin_type}\")" --network $NETWORK
+# set fee address on port 
+aptos_port_addr=0x933707720e4def37d4a69c0f83366a6c5bc7fc6309891a60d4013777cdb81fc7
+aptos_route_address=0xcf56359a741035f960f82d3cc0454cbb228885d19b822fa6b610e450826fe097
+module_id=aptos_port
+# func_id=set_fee_address
+aptos move run --function-id $aptos_port_addr::$module_id::set_fee_address --args \
+address:${aptos_route_address} \
+--profile omnity-devnet
+# check 
+aptos move view --function-id $aptos_port_addr::$module_id::get_fee_address --profile omnity-devnet
 
-address=0xaf9306cac62396be300b175046140c392eed876bd8ac0efac6301cea286fa272
-struct_type="0x2::coin::Coin<0x2::aptos::aptos>"
-dfx canister call aptos_route get_owner_objects "(\"${address}\",opt \"${struct_type}\")" --network $NETWORK
-
-obj_id="0x62f219823a358961015fbe6e712b571aca62442092e4ab6a0b409bbb20697fb8"
-dfx canister call aptos_route get_object "(\"${obj_id}\")" --network $NETWORK
-
-coin_type="0x2::aptos::aptos"
-dfx canister call aptos_route get_coins "(\"${aptos_route_address}\",opt \"${coin_type}\")" --network $NETWORK
-
-# get_transaction_block
-digest=8Qffae1qP1ssr8LiX3pZ9TUVCrkhuMTStappV5JPcJYY
-dfx canister call aptos_route get_transaction_block "(\"${digest}\")" --network $NETWORK
-
-# get events
-digest=8Qffae1qP1ssr8LiX3pZ9TUVCrkhuMTStappV5JPcJYY
-dfx canister call aptos_route get_events "(\"${digest}\")" --network $NETWORK
-
-
-# tansfer aptos from aptos route to recipient
-echo aptos route address balance: 
-aptos client gas $aptos_route_address
-recipient=0xaf9306cac62396be300b175046140c392eed876bd8ac0efac6301cea286fa272
-# aptos client objects $recipient
-amount=50000000
-digest=$(dfx canister call aptos_route transfer_aptos "(\"$recipient\",$amount)" --network $NETWORK)
-digest=$(echo "$digest" | awk -F'"' '{print $2}')
-echo "$digest"
-dfx canister call aptos_route get_transaction_block "(\"${digest}\")" --network $NETWORK
-
-# transfer object to recipent
-recipient=0x021e364dfa89ce87cbfbbae322ebd730c0737ff10a41d4a3b295f1b386031c51
-obj_id=0xb55f302a44034dd7b6e1bcac542a434f234f67daea34773f66af31af10044656
-dfx canister call aptos_route transfer_object "(\"$recipient\",\"$obj_id\")" --network $NETWORK
-
-################################################################
-# Note: publish aptos port contracts,includes action and tokens
-# transfer coin treasury cap/coin metadata/ port_owner_cap/ from publisher to aptos route address 
-# ref to aptos port README
-################################################################
-
-aptos client objects $aptos_route_address
 
 # update aptos port action info
-port_owner_cap=0x4a990b885d5834e72442fa49ab13d004c3d518904caeef0cc88f7ebd0398ae10
-ticket_table=0xff08353287be3005ca5b31f288c8592f0b613d9f37156f7255eda8e395f54286
-action_package=0x26c5ce2c1ed70b877723bbebc13c9c10984bc113b4095492cc081a41c78dddf4
-action_module=action
-action_upgrade=0x14e7da34ae3f68e6f087c96ea9dc4e22dad49ffff2a4c8f3b38ebf032a9152c5
+port_pkg=0x933707720e4def37d4a69c0f83366a6c5bc7fc6309891a60d4013777cdb81fc7
+dfx canister call aptos_route update_port_package "(\"${port_pkg}\")" --network $NETWORK
+
+# update port info on route
+
+port_owner=$aptos_port_addr
+port_pkg=$aptos_port_addr
+module=$module_id
+fee_addr=$aptos_route_address
+aptos_route=$aptos_route_address
+
 # update aptos port action info to aptos route
-dfx canister call aptos_route update_aptos_port_action "(
+dfx canister call aptos_route update_aptos_ports "(
     record {
-       package = \"$action_package\";
-       module = \"$action_module\";
-       functions = vec { \"mint\";
-                         \"mint_with_ticket\";
+       port_owner = \"${port_owner}\";
+       package = \"$port_pkg\";
+       module = \"$module\";
+       fee_addr =  \"$fee_addr\";
+       aptos_route =  \"$aptos_route\";
+       functions = vec { \"set_route_address\";
+                         \"set_fee_address\";
+                         \"create_fa\";
+                         \"mint_fa_with_ticket\";
+                         \"burn_fa\";
                          \"collect_fee\";
-                         \"burn_coin\";
-                         \"redeem\";
-                         \"create_ticket_table\";
-                         \"minted_ticket\";
                          \"remove_ticket\";
-                         \"drop_ticket_table\";
+                         \"mutate_metadata\";
                          };
-      port_owner_cap = \"$port_owner_cap\";
-      ticket_table = \"$ticket_table\";
-      upgrade_cap = \"$action_upgrade\";
     }
 )" --network $NETWORK
 
-dfx canister call aptos_route aptos_port_action '()' --network $NETWORK
+dfx canister call aptos_route aptos_ports '()' --network $NETWORK
+
+
+# sumbit create fa req
+token_id="Bitcoin-runes-FOUR•TOKEN"
+token_name="Four Token"
+symbol=FT
+icon_uri="https://raw.githubusercontent.com/PanoraExchange/Aptos-Tokens/main/logos/APT.svg"
+project_uri="https://www.omnity.network/"
+# rune_id="840000:846"
+
+dfx canister call aptos_route add_token "(record {
+        token_id=\"${token_id}\";
+        name=\"${token_name}\";
+        symbol=\"${symbol}\";
+        decimals=9:nat8;
+        icon=opt \"${icon_uri}\";
+        metadata = vec{ record {\"rune_id\" ; \"840000:888\"}};
+})" --network $NETWORK
+
+dfx canister call aptos_route get_token "(\"${token_id}\")" --network $NETWORK
+
+
+dfx canister call aptos_route submit_tx  "(variant { CreateToken =
+        record { name=\"${token_name}\"; 
+                 symbol=\"${symbol}\";
+                 decimals=9;
+                 icon_uri=\"${icon_uri}\";
+                 max_supply=null;
+                 project_uri=\"${project_uri}\"
+                } 
+            } )" --network $NETWORK
 
 
 
-# update aptos port token info for ICP
-token_id=Bitcoin-runes-DOG•GO•TO•THE•MOON
-coin_package=0xe27ec5044f815be78ba062515d3139cd1181028ca3013fa19bab7567539cca21
-coin_module=dog
-coin_treasury_cap=0xc82532fc14d6db37b7953208a3581675fcf67ee462cd3fd5cbea23fef23929b7
-coin_metadata=0x525d6dd219e75f5d7f780c6492ce89c8153500a7cffdeb4e33c58b0beccaec75
-type_tag=0xe27ec5044f815be78ba062515d3139cd1181028ca3013fa19bab7567539cca21::dog::DOG
-coin_upgrade=0x9af72cd1faa3a287df423b8d1726e3f82b2c694ed1f75130d73ce2d64816b95e
+txn_hash="0x49eddca2fb0e4f4682502ee6e3bd0a2b97ee6b382af9793c5030674ec8ce514a"
+dfx canister call aptos_route get_transaction_by_hash "(\"${txn_hash}\")" --network $NETWORK
+
+# query fa object id from port
+aptos move view --function-id $aptos_port_addr::aptos_port::get_registry --profile omnity-devnet
+
+# update aptos token info for "Bitcoin-runes-FOUR•TOKEN"
+token_id="Bitcoin-runes-FOUR•TOKEN"
+fa_obj="0xf6350330a6fd3735ff35c6665c7ed56ac38f2c3fd48602140b7e81bc7244d49b"
+type_tag="0x1::fungible_asset::Metadata"
 
 dfx canister call aptos_route update_aptos_token "(
     \"$token_id\",
     record {
-       package = \"$coin_package\";
-       module = \"$coin_module\";
-       treasury_cap = \"$coin_treasury_cap\";
-       metadata = \"$coin_metadata\";
+       object_id = \"$fa_obj\";
        type_tag = \"$type_tag\";
-       functions = vec {};
-       upgrade_cap = \"$coin_upgrade\";
     }
 )" --network $NETWORK
 
 dfx canister call aptos_route aptos_token "(\"$token_id\")" --network $NETWORK
 
 
-# update aptos port token info for RICH.OT
-token_id="Bitcoin-runes-HOPE•YOU•GET•RICH"
-coin_package=0xa071e8021b690d58dbc1112eaba6f9361ee9deda527775aefaf896686996fd8c
-coin_module=rich
-coin_treasury_cap="0x6c36691b6b50759073d49586b9ab8abe131af4d83e525ca868a7b1355957e389"
-coin_metadata="0x92486543cbf10231ac47257ec392c7d6d5fb7c866e1ddeb7e199f70f95034d9f"
-type_tag=0xa071e8021b690d58dbc1112eaba6f9361ee9deda527775aefaf896686996fd8c::rich::RICH
-token_upgrade=0xf410a4a2e55c8ce83c0c3ea0582c9ab2e869f3b75661b81e3e34d12ff4222c5f
+# mint token
+# aptos move run --function-id $aptos_port_addr::aptos_port::mint_fa_with_ticket --args \
+#  "string:ticket-2" \
+#  "address:0xdb0662d8cd74ac3539888d40c9d11411034758efdc1c7c286a801ad0324dc34e" \
+#  "address:0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8" \
+#  "u64:888888"  \
+#  --profile omnity-devnet
+fa_obj="0xf6350330a6fd3735ff35c6665c7ed56ac38f2c3fd48602140b7e81bc7244d49b"
+recipient=0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8
+timestamp=$(date +"%Y%m%d%H%M")
+ticket_id=${token_id}-$timestamp
+mint_acmount=8000000000
+# KEYTYPE="variant { ChainKey }"
+KEYTYPE="variant { Native }"
+dfx canister call aptos_route submit_tx  "(variant { MintToken =
+        record { 
+                 ticket_id=\"${ticket_id}\";
+                 fa_obj=\"${fa_obj}\";
+                 recipient=\"${recipient}\"; 
+                 mint_acmount=${mint_acmount};
+                } 
+        },
+        $KEYTYPE
+    )" --network $NETWORK
 
-dfx canister call aptos_route update_aptos_token "(
-    \"$token_id\",
-    record {
-       package = \"$coin_package\";
-       module = \"$coin_module\";
-       treasury_cap = \"$coin_treasury_cap\";
-       metadata = \"$coin_metadata\";
-       type_tag = \"$type_tag\";
-       functions = vec {};
-       upgrade_cap = \"$token_upgrade\";
-    }
-)" --network $NETWORK
+txn_hash="0x70587dee9d53d2d02b674f106616f59cd4215ae9023d0ef272c274ea6ba6b297"
+dfx canister call aptos_route get_transaction_by_hash "(\"${txn_hash}\")" --network $NETWORK
 
-dfx canister call aptos_route aptos_token "(\"$token_id\")" --network $NETWORK
+# burn token
+fa_obj="0xf6350330a6fd3735ff35c6665c7ed56ac38f2c3fd48602140b7e81bc7244d49b"
+burn_acmount=2000000000
+# KEYTYPE="variant { ChainKey }"
+KEYTYPE="variant { Native }"
+dfx canister call aptos_route submit_tx  "(variant { BurnToken =
+        record { 
+                 fa_obj=\"${fa_obj}\";
+                 burn_acmount=${burn_acmount};
+                } 
+        },
+        $KEYTYPE
+    )" --network $NETWORK
 
+txn_hash="0xfe83962f7d9b2994dec037410717f2af9335aed04a596785543548448e8b93a0"
+dfx canister call aptos_route get_transaction_by_hash "(\"${txn_hash}\")" --network $NETWORK
+
+# collect fee
+fa_obj="0xf6350330a6fd3735ff35c6665c7ed56ac38f2c3fd48602140b7e81bc7244d49b"
+fee_acmount=50000000
+# KEYTYPE="variant { ChainKey }"
+KEYTYPE="variant { Native }"
+dfx canister call aptos_route submit_tx  "(variant { CollectFee =${fee_acmount}},
+        $KEYTYPE
+    )" --network $NETWORK
+
+txn_hash="0xf3cceff6f3fd9c923628d6b16646b310ff3f0819b83d3d7a6a60d040e4e1965f"
+dfx canister call aptos_route get_transaction_by_hash "(\"${txn_hash}\")" --network $NETWORK
+
+# remove ticket
+ticket_id=-202503011901
+# KEYTYPE="variant { ChainKey }"
+KEYTYPE="variant { Native }"
+dfx canister call aptos_route submit_tx  "(variant { RemoveTicket =\"${ticket_id}\"},
+        $KEYTYPE
+    )" --network $NETWORK
+
+txn_hash="0x43a161ae13cbf8733b6d85da3a0acd9f032f64f6050681676269c0ecd4b2d220"
+dfx canister call aptos_route get_transaction_by_hash "(\"${txn_hash}\")" --network $NETWORK
+
+
+# update token meta
+fa_obj="0xf6350330a6fd3735ff35c6665c7ed56ac38f2c3fd48602140b7e81bc7244d49b"
+token_id="Bitcoin-runes-FOUR•TOKEN"
+token_name="Four Token"
+symbol=FT
+icon_uri="https://raw.githubusercontent.com/PanoraExchange/Aptos-Tokens/main/logos/APT.svg"
+project_uri="https://www.omnity.network/"
+KEYTYPE="variant { Native }"
+dfx canister call aptos_route add_token "(record {
+        token_id=\"${token_id}\";
+        name=\"${token_name}\";
+        symbol=\"${symbol}\";
+        decimals=9:nat8;
+        icon=opt \"${icon_uri}\";
+        metadata = vec{ record {\"rune_id\" ; \"840000:888\"}};
+})" --network $NETWORK
+
+dfx canister call aptos_route get_token "(\"${token_id}\")" --network $NETWORK
+
+
+dfx canister call aptos_route submit_tx  "(variant { UpdateMeta =
+            record {
+                 fa_obj=\"${fa_obj}\"; 
+                 name=null; 
+                 symbol=null;
+                 decimals=null;
+                 icon_uri=opt \"${icon_uri}\";
+                 project_uri=null;
+                } 
+            },
+            $KEYTYPE
+    )" --network $NETWORK
+
+txn_hash="0x93449319dce1cd62b7e067166e809c6868ec7cb9656b8e5334768fd50bb4a207"
+dfx canister call aptos_route get_transaction_by_hash "(\"${txn_hash}\")" --network $NETWORK
+
+token_id="Bitcoin-runes-FIVE•TOKEN"
+aptos move run --function-id $aptos_port_addr::aptos_port::create_fa_v2 --args \
+"string: Bitcoin-runes-FIVE•TOKEN" \
+"string: Five Token" \
+"string: FT" \
+u8:5 \
+"string:https://raw.githubusercontent.com/PanoraExchange/Aptos-Tokens/main/logos/APT.svg" \
+"string:" \
+u8:[]  \
+--profile omnity-devnet
+
+token_id="Bitcoin-runes-FIVE•TOKEN"
+token_name="FIVE•TOKEN Token"
+symbol=FT
+icon_uri="https://raw.githubusercontent.com/PanoraExchange/Aptos-Tokens/main/logos/APT.svg"
+project_uri="https://www.omnity.network/"
+# rune_id="840000:846"
+
+dfx canister call aptos_route add_token "(record {
+        token_id=\"${token_id}\";
+        name=\"${token_name}\";
+        symbol=\"${symbol}\";
+        decimals=5:nat8;
+        icon=opt \"${icon_uri}\";
+        metadata = vec{ record {\"rune_id\" ; \"840000:555\"}};
+})" --network $NETWORK
+
+dfx canister call aptos_route get_token "(\"${token_id}\")" --network $NETWORK
+
+
+dfx canister call aptos_route submit_tx  "(variant { CreateTokenV2 =
+        record { 
+                 token_id=\"${token_id}\"; 
+                 name=\"${token_name}\"; 
+                 symbol=\"${symbol}\";
+                 decimals=5;
+                 icon_uri=\"${icon_uri}\";
+                 max_supply=null;
+                 project_uri=\"${project_uri}\"
+                } 
+            },
+        $KEYTYPE
+     )" --network $NETWORK
+
+
+dfx canister call aptos_route submit_tx  "(variant { CreateToken =
+        record { 
+                 name=\"${token_name}\"; 
+                 symbol=\"${symbol}\";
+                 decimals=5;
+                 icon_uri=\"${icon_uri}\";
+                 max_supply=null;
+                 project_uri=\"${project_uri}\"
+                } 
+            },
+        $KEYTYPE
+     )" --network $NETWORK
+
+
+txn_hash="0xb7d8c5b55eaecb5b256e051fff7c1d218eaf633cc260aff0e02aa2298e8f7a76"
+dfx canister call aptos_route get_transaction_by_hash "(\"${txn_hash}\")" --network $NETWORK
+
+aptos move view --function-id $aptos_port_addr::$module_id::get_fa_obj --args \
+string:$token_id \
+--profile omnity-devnet
+
+view_func="0xa67e91bfc6ff1520ae025aa4a2c9472a2fef95a7f18fcc34941f9a8747daff2e::aptos_port::get_fa_obj"
+token_id=" Bitcoin-runes-FIVE•TOKEN"
+dfx canister call aptos_route get_fa_obj_from_port "(\"${view_func}\",\"${token_id}\")" --network $NETWORK
 
 # mint token to recipient
 token_id="Bitcoin-runes-HOPE•YOU•GET•RICH"
@@ -308,39 +445,6 @@ echo "aptos route address:$route_address"
 redeem_amount=50000000
 echo "redeem amount: $redeem_amount"
 
-
-# call redeem via aptos client ptb cli
-aptos client ptb \
-  --assign fee_amount $fee_amount \
-  --assign recipient @$fee_account \
-  --split-coins gas [fee_amount] \
-  --assign fee_coins \
-  --move-call $package::$module::collect_fee fee_coins.0 recipient \
-  --make-move-vec "<u8>" $target_chain_id \
-  --assign target_chain_id_bytes \
-  --move-call std::string::utf8 target_chain_id_bytes \
-  --assign target_chain_id \
-  --make-move-vec "<u8>" $token_id \
-  --assign token_id_bytes \
-  --move-call std::string::utf8 token_id_bytes \
-  --assign token_id \
-  --make-move-vec "<u8>" $receiver \
-  --assign receiver_bytes \
-  --move-call std::string::utf8 receiver_bytes \
-  --assign receiver \
-  --make-move-vec "<u8>" $memo \
-  --assign memo_bytes \
-  --move-call std::string::utf8 memo_bytes \
-  --assign memo_str \
-  --move-call std::option::some "<std::string::String>" memo_str \
-  --assign memo \
-  --split-coins @$burn_token_obj [$redeem_amount] \
-  --assign burn_token \
-  --assign route_address @$route_address \
-  --move-call $package::$module::redeem target_chain_id token_id burn_token receiver memo route_address \
-  --gas-budget 100000000 \
-  --dry-run
-  
 
 dfx canister call aptos_route get_chain_list '()' --network $NETWORK
 dfx canister call aptos_route get_token_list '()' --network $NETWORK
@@ -512,23 +616,6 @@ dfx canister call aptos_route fetch_coin "(
     $threshold:nat64)" --network $NETWORK
 
 
-TOKEN_ID="Bitcoin-runes-HOPE•YOU•GET•RICH"
-TOKEN_NAME="HOPE•YOU•GET•RICH"
-TOKEN_SYMBOL="RICH.OT"
-DECIMALS=2
-RUNE_ID="840000:846"
-ICON="https://raw.githubusercontent.com/octopus-network/omnity-token-imgs/main/metadata/rich_ot_meta.json"
-
-dfx canister call aptos_route add_token "(record {
-        token_id=\"${TOKEN_ID}\";
-        name=\"${TOKEN_NAME}\";
-        symbol=\"${TOKEN_SYMBOL}\";
-        decimals=${DECIMALS}:nat8;
-        icon=opt \"${ICON}\";
-        metadata = vec{ record {\"rune_id\" ; \"840000:846\"}};
-})" --network $NETWORK
-
-dfx canister call aptos_route get_token "(\"${TOKEN_ID}\")" --network $NETWORK
 
 # check route config 
 dfx canister call aptos_route get_route_config '()' --network $NETWORK

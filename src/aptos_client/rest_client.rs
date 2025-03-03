@@ -1,15 +1,18 @@
 #![allow(unused)]
-use crate::aptos_client::constants::{FORWARD_KEY, HEADER_SIZE_LIMIT, IDEMPOTENCY_KEY};
-use crate::aptos_client::error::RestError;
+use crate::aptos_client::constants::{
+    FORWARD_KEY, HEADER_SIZE_LIMIT, IDEMPOTENCY_KEY, TRANSACTION_RESPONSE_SIZE_ESTIMATE,
+};
+use crate::aptos_client::error::AptosRouteError;
 use crate::aptos_client::request::{self, build_rest_req};
 use crate::aptos_client::utils::get_http_request_cost;
-use crate::config::{mutate_config, read_config, AptosPortAction};
+use crate::config::{mutate_config, read_config};
 use crate::constants::{
-    BURN_FUNC, COIN_MODULE, COIN_PKG_ID, DEFAULT_GAS_BUDGET, MINT_FUNC, MINT_WITH_TICKET_FUNC,
-    SUI_COIN, UPDATE_DESC_FUNC, UPDATE_ICON_FUNC, UPDATE_NAME_FUNC, UPDATE_SYMBOL_FUNC,
+    COIN_MODULE, COIN_PKG_ID, DEFAULT_GAS_BUDGET, MINT_WITH_TICKET_FUNC, SUI_COIN,
+    UPDATE_DESC_FUNC, UPDATE_ICON_FUNC, UPDATE_NAME_FUNC, UPDATE_SYMBOL_FUNC,
 };
 use crate::ic_log::{DEBUG, ERROR};
 
+use crate::service::forward;
 use crate::state::{mutate_state, read_state, AptosToken, UpdateType};
 
 use aptos_api_types::transaction::Transaction;
@@ -98,13 +101,22 @@ pub type RpcResult<T> = Result<T, RpcError>;
 pub struct RestClient {
     pub provider: Provider,
     pub nodes_in_subnet: Option<u32>,
+    pub forward: Option<String>,
 }
 
 impl RestClient {
-    pub fn new(provider: Provider, nodes_in_subnet: Option<u32>) -> Self {
+    pub fn new() -> Self {
+        let (provider, nodes_in_subnet, forward) = read_config(|s| {
+            (
+                s.get().rpc_provider.to_owned(),
+                s.get().nodes_in_subnet,
+                s.get().forward.to_owned(),
+            )
+        });
         Self {
             provider,
-            nodes_in_subnet,
+            forward,
+            nodes_in_subnet: Some(nodes_in_subnet),
         }
     }
 
@@ -140,12 +152,12 @@ impl RestClient {
         mut req: RestReq,
         max_response_bytes: u64,
         transform: Option<TransformContext>,
-        forward: Option<String>,
+        forward: &Option<String>,
     ) -> AptosResult<HttpResponse> {
-        // let transform = transform.unwrap_or(TransformContext::from_name(
-        //     "cleanup_response".to_owned(),
-        //     vec![],
-        // ));
+        let transform = transform.unwrap_or(TransformContext::from_name(
+            "cleanup_response".to_owned(),
+            vec![],
+        ));
 
         // add forward address
         if let Some(forward) = forward.to_owned() {
@@ -166,8 +178,7 @@ impl RestClient {
             method: req.method,
             headers: req.headers,
             body: req.body,
-            // transform: Some(transform),
-            transform: None,
+            transform: Some(transform),
         };
 
         let url = req.url.to_string();
@@ -210,7 +221,7 @@ impl RestClient {
                     url,
                     elapsed
                 );
-                Err(RestError::HttpCallError(format!("({r:?}) {m:?}")))
+                Err(AptosRouteError::HttpCallError(format!("({r:?}) {m:?}")))
             }
         }
     }
@@ -219,7 +230,7 @@ impl RestClient {
         &self,
         address: String,
         ledger_version: Option<u64>,
-        forward: Option<String>,
+        forward: &Option<String>,
     ) -> AptosResult<Account> {
         let mut req = build_rest_req(request::AtosRequest::GetAccount { address });
         log!(DEBUG, "[rpc_client::get_account] request: {:?} ", req);
@@ -238,7 +249,7 @@ impl RestClient {
         &self,
         address: String,
         asset_type: Option<String>,
-        forward: Option<String>,
+        forward: &Option<String>,
     ) -> AptosResult<u64> {
         let mut req = build_rest_req(request::AtosRequest::GetAccountBalance {
             address,
@@ -258,37 +269,51 @@ impl RestClient {
         );
         // self.json(response)
         let balance = String::from_utf8(response.body)
-            .map_err(|e| RestError::ParseError(e.to_string()))?
+            .map_err(|e| AptosRouteError::ParseError(e.to_string()))?
             .parse::<u64>()
-            .map_err(|e| RestError::ParseError(e.to_string()))?;
+            .map_err(|e| AptosRouteError::ParseError(e.to_string()))?;
 
         Ok(balance)
     }
 
-    pub async fn transfer_aptos(
+    pub async fn get_fa_obj(
+        &self,
+        view_func: String,
+        token_id: String,
+        forward: &Option<String>,
+    ) -> AptosResult<Vec<String>> {
+        let mut req = build_rest_req(request::AtosRequest::GetFaObj {
+            view_func,
+            token_id,
+        });
+        log!(DEBUG, "[rpc_client::get_fa_obj] request: {:?} ", req);
+
+        let response = self.call(req, 1000, None, forward).await?;
+        match self.json::<Vec<String>>(response) {
+            Ok(response) => Ok(response.into_inner()),
+            Err(e) => {
+                log!(DEBUG, "[rpc_client::get_fa_obj] response error: {:?}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    pub async fn summit_tx(
         &self,
         txn: &SignedTransaction,
-        forward: Option<String>,
+        forward: &Option<String>,
     ) -> AptosResult<PendingTransaction> {
         let mut req = build_rest_req(request::AtosRequest::SubmitTransaction {
             txn: txn.to_owned(),
         });
-        log!(DEBUG, "[rpc_client::transfer_aptos] request: {:?} ", req);
+        log!(DEBUG, "[rpc_client::summit_tx] request: {:?} ", req);
 
         let response = self.call(req, 5000, None, forward).await?;
-        log!(
-            DEBUG,
-            "[rpc_client::transfer_aptos] response: {:?} ",
-            response
-        );
+        log!(DEBUG, "[rpc_client::summit_tx] response: {:?} ", response);
         match self.json::<PendingTransaction>(response) {
             Ok(response) => Ok(response.into_inner()),
             Err(e) => {
-                log!(
-                    DEBUG,
-                    "[rpc_client::transfer_aptos] response error: {:?}",
-                    e
-                );
+                log!(DEBUG, "[rpc_client::summit_tx] response error: {:?}", e);
                 Err(e.into())
             }
         }
@@ -297,8 +322,7 @@ impl RestClient {
     pub async fn get_transaction_by_hash(
         &self,
         txn_hash: String,
-
-        forward: Option<String>,
+        forward: &Option<String>,
     ) -> AptosResult<Transaction> {
         let mut req = build_rest_req(request::AtosRequest::GetTransactionByHash { txn_hash });
         log!(
@@ -307,7 +331,9 @@ impl RestClient {
             req
         );
 
-        let response = self.call(req, 5000, None, forward).await?;
+        let response = self
+            .call(req, TRANSACTION_RESPONSE_SIZE_ESTIMATE, None, forward)
+            .await?;
         match self.json::<Transaction>(response) {
             Ok(response) => Ok(response.into_inner()),
             Err(e) => {
@@ -325,7 +351,7 @@ impl RestClient {
         // Check if status is within 200-299.
         //TODO map err
         let status_code: u16 = response.status.to_owned().0.try_into().map_err(|_| {
-            RestError::ParseError(format!("Invalid status code: {:?}", response.status))
+            AptosRouteError::ParseError(format!("Invalid status code: {:?}", response.status))
         })?;
         if !(300 > status_code && status_code >= 200) {
             Err(parse_error(response))
@@ -347,306 +373,4 @@ impl RestClient {
 }
 
 #[cfg(test)]
-mod test {
-    // use aptos_api_types::PendingTransaction;
-
-    use aptos_api_types::move_types::{EntryFunctionId, MoveType};
-    use aptos_api_types::transaction::{Event, TransactionInfo, TransactionSignature};
-    use aptos_api_types::{Address, HashValue, U64};
-    use candid::Deserialize;
-    use serde::Serialize;
-
-    /// A transaction waiting in mempool
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct PendingTransaction {
-        pub hash: HashValue,
-        #[serde(flatten)]
-        pub request: UserTransactionRequest,
-    }
-
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct UserTransactionRequest {
-        pub sender: Address,
-        pub sequence_number: U64,
-        pub max_gas_amount: U64,
-        pub gas_unit_price: U64,
-        pub expiration_timestamp_secs: U64,
-        pub payload: TransactionPayload,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub signature: Option<TransactionSignature>,
-    }
-
-    /// An enum of the possible transaction payloads
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(tag = "type", rename_all = "snake_case")]
-
-    pub enum TransactionPayload {
-        EntryFunctionPayload(EntryFunctionPayload),
-        // ScriptPayload(ScriptPayload),
-    }
-    /// Payload which runs a single entry function
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct EntryFunctionPayload {
-        pub function: EntryFunctionId,
-        /// Type arguments of the function
-        pub type_arguments: Vec<MoveType>,
-        /// Arguments of the function
-        pub arguments: Vec<serde_json::Value>,
-    }
-
-    /// Enum of the different types of transactions in Aptos
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(tag = "type", rename_all = "snake_case")]
-    // //#[oai(one_of, discriminator_name = "type", rename_all = "snake_case")]
-    pub enum Transaction {
-        PendingTransaction(PendingTransaction),
-        UserTransaction(UserTransaction),
-    }
-
-    /// A transaction submitted by a user to change the state of the blockchain
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct UserTransaction {
-        #[serde(flatten)]
-        pub info: TransactionInfo,
-        #[serde(flatten)]
-        pub request: UserTransactionRequest,
-        /// Events generated by the transaction
-        pub events: Vec<Event>,
-        pub timestamp: U64,
-    }
-
-    #[test]
-    fn parse_devnet_pending_tx() {
-        let json_str = r#" 
-            {
-            "hash": "0x169238641c3f97f2bc0b4a46707faf12457de857015f0882c6b2635e17486e4a",
-            "sender": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-            "sequence_number": "1",
-            "max_gas_amount": "5000",
-            "gas_unit_price": "150",
-            "expiration_timestamp_secs": "1740473379",
-            "payload":
-                {
-                "function": "0x1::aptos_account::transfer_coins",
-                "type_arguments": ["0x1::aptos_coin::AptosCoin"],
-                "arguments":
-                    [
-                    "0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8",
-                    "20000000"
-                    ],
-                "type": "entry_function_payload"
-                },
-            "signature":
-                {
-                "public_key": "0x403baa9a6c9c303abbf463a47e39cbe36f5c7d3def5bde5d5725151264fb1de7",
-                "signature": "0x4bb257dd0189ea8c0f3effdc152f05a42f65f2e076c56614a7f3c24ae1e69ed6cb6cd417b321b74d4457643f0ef9e369769db1df1705a2ffdd34d4f425b7fe08",
-                "type": "ed25519_signature"
-                }
-            }
-        "#;
-
-        let json_response = serde_json::from_str::<PendingTransaction>(json_str);
-        println!("json_response: {:#?}", json_response);
-    }
-
-    #[test]
-    fn parse_devnet_finalized_tx() {
-        let json_str = r#" 
-            {
-                "version": "47261875",
-                "hash": "0x169238641c3f97f2bc0b4a46707faf12457de857015f0882c6b2635e17486e4a",
-                "state_change_hash": "0x818375654f5e358d08152afc8ac5c09880f01204926abbf1c75c2d530a4bdb82",
-                "event_root_hash": "0x155fe8f10d6504d6b89015f856b9e1357957565148efde0b17529974d492176a",
-                "state_checkpoint_hash": null,
-                "gas_used": "11",
-                "success": true,
-                "vm_status": "Executed successfully",
-                "accumulator_root_hash": "0x18209b2057a3afc17e4cc324678b256d67f318fff5beb182adf50e1784033011",
-                "changes": [
-                    {
-                    "address": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-                    "state_key_hash": "0x30ddb15d4d66160ea8283d3a9b2831fd592f216dd5c8b5ff5b8e21ec37c95607",
-                    "data": {
-                        "type": "0x1::coin::CoinStore<0x1::aptos_coin::AptosCoin>",
-                        "data": {
-                        "coin": {
-                            "value": "69996700"
-                        },
-                        "deposit_events": {
-                            "counter": "0",
-                            "guid": {
-                            "id": {
-                                "addr": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-                                "creation_num": "2"
-                            }
-                            }
-                        },
-                        "frozen": false,
-                        "withdraw_events": {
-                            "counter": "0",
-                            "guid": {
-                            "id": {
-                                "addr": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-                                "creation_num": "3"
-                            }
-                            }
-                        }
-                        }
-                    },
-                    "type": "write_resource"
-                    },
-                    {
-                    "address": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-                    "state_key_hash": "0xb7c8165bebf33e974a6821b4d4a8faf647d7e0b694eec2a2bf313d967c9bbe37",
-                    "data": {
-                        "type": "0x1::account::Account",
-                        "data": {
-                        "authentication_key": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-                        "coin_register_events": {
-                            "counter": "0",
-                            "guid": {
-                            "id": {
-                                "addr": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-                                "creation_num": "0"
-                            }
-                            }
-                        },
-                        "guid_creation_num": "4",
-                        "key_rotation_events": {
-                            "counter": "0",
-                            "guid": {
-                            "id": {
-                                "addr": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-                                "creation_num": "1"
-                            }
-                            }
-                        },
-                        "rotation_capability_offer": {
-                            "for": {
-                            "vec": []
-                            }
-                        },
-                        "sequence_number": "2",
-                        "signer_capability_offer": {
-                            "for": {
-                            "vec": []
-                            }
-                        }
-                        }
-                    },
-                    "type": "write_resource"
-                    },
-                    {
-                    "address": "0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8",
-                    "state_key_hash": "0xd01cd0adbba7a65aa819101079614191505c5e1f2717cec5807f378b981b0e6f",
-                    "data": {
-                        "type": "0x1::coin::CoinStore<0x1::aptos_coin::AptosCoin>",
-                        "data": {
-                        "coin": {
-                            "value": "180000000"
-                        },
-                        "deposit_events": {
-                            "counter": "0",
-                            "guid": {
-                            "id": {
-                                "addr": "0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8",
-                                "creation_num": "2"
-                            }
-                            }
-                        },
-                        "frozen": false,
-                        "withdraw_events": {
-                            "counter": "0",
-                            "guid": {
-                            "id": {
-                                "addr": "0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8",
-                                "creation_num": "3"
-                            }
-                            }
-                        }
-                        }
-                    },
-                    "type": "write_resource"
-                    },
-                    {
-                    "state_key_hash": "0x6e4b28d40f98a106a65163530924c0dcb40c1349d3aa915d108b4d6cfc1ddb19",
-                    "handle": "0x1b854694ae746cdbd8d44186ca4929b2b337df21d1c74633be19b2710552fdca",
-                    "key": "0x0619dc29a0aac8fa146714058e8dd6d2d0f3bdf5f6331907bf91f3acd81e6935",
-                    "value": "0x0bb8852922cb01000100000000000000",
-                    "data": null,
-                    "type": "write_table_item"
-                    }
-                ],
-                "sender": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-                "sequence_number": "1",
-                "max_gas_amount": "5000",
-                "gas_unit_price": "150",
-                "expiration_timestamp_secs": "1740473379",
-                "payload": {
-                    "function": "0x1::aptos_account::transfer_coins",
-                    "type_arguments": [
-                    "0x1::aptos_coin::AptosCoin"
-                    ],
-                    "arguments": [
-                    "0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8",
-                    "20000000"
-                    ],
-                    "type": "entry_function_payload"
-                },
-                "signature": {
-                    "public_key": "0x403baa9a6c9c303abbf463a47e39cbe36f5c7d3def5bde5d5725151264fb1de7",
-                    "signature": "0x4bb257dd0189ea8c0f3effdc152f05a42f65f2e076c56614a7f3c24ae1e69ed6cb6cd417b321b74d4457643f0ef9e369769db1df1705a2ffdd34d4f425b7fe08",
-                    "type": "ed25519_signature"
-                },
-                "events": [
-                    {
-                    "guid": {
-                        "creation_number": "0",
-                        "account_address": "0x0"
-                    },
-                    "sequence_number": "0",
-                    "type": "0x1::coin::CoinWithdraw",
-                    "data": {
-                        "account": "0x140549f1a4aade6333b361764d772256c962810c3f934d451e1d84481732d874",
-                        "amount": "20000000",
-                        "coin_type": "0x1::aptos_coin::AptosCoin"
-                    }
-                    },
-                    {
-                    "guid": {
-                        "creation_number": "0",
-                        "account_address": "0x0"
-                    },
-                    "sequence_number": "0",
-                    "type": "0x1::coin::CoinDeposit",
-                    "data": {
-                        "account": "0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8",
-                        "amount": "20000000",
-                        "coin_type": "0x1::aptos_coin::AptosCoin"
-                    }
-                    },
-                    {
-                    "guid": {
-                        "creation_number": "0",
-                        "account_address": "0x0"
-                    },
-                    "sequence_number": "0",
-                    "type": "0x1::transaction_fee::FeeStatement",
-                    "data": {
-                        "execution_gas_units": "5",
-                        "io_gas_units": "6",
-                        "storage_fee_octas": "0",
-                        "storage_fee_refund_octas": "0",
-                        "total_charge_gas_units": "11"
-                    }
-                    }
-                ],
-                "timestamp": "1740472885223509",
-                "type": "user_transaction"
-            }
-        "#;
-
-        let json_response = serde_json::from_str::<Transaction>(json_str);
-        println!("json_response: {:#?}", json_response);
-    }
-}
+mod test {}

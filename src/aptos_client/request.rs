@@ -15,6 +15,7 @@ use super::constants::IDEMPOTENCY_KEY;
 pub enum AtosRequest {
     GetAccount { address: String },
     GetAccountBalance { address: String, asset_type: String },
+    GetFaObj { view_func: String, token_id: String },
     SubmitTransaction { txn: SignedTransaction },
     GetTransactionByHash { txn_hash: String },
 }
@@ -31,6 +32,7 @@ impl fmt::Display for AtosRequest {
             AtosRequest::GetTransactionByHash { txn_hash } => {
                 format!("/transactions/by_hash/{}", txn_hash)
             }
+            AtosRequest::GetFaObj { .. } => format!("/view"),
         };
 
         write!(f, "{method}")
@@ -51,7 +53,7 @@ pub fn build_rest_req(req: AtosRequest) -> RestReq {
         AtosRequest::GetAccount { address } => {
             let headers = vec![HttpHeader {
                 name: "Content-Type".to_string(),
-                value: "Accept: application/json, application/x-bcs".to_string(),
+                value: "application/json, application/x-bcs".to_string(),
             }];
             RestReq {
                 method: HttpMethod::GET,
@@ -71,7 +73,7 @@ pub fn build_rest_req(req: AtosRequest) -> RestReq {
         } => {
             let headers = vec![HttpHeader {
                 name: "Content-Type".to_string(),
-                value: "Accept: application/json, application/x-bcs".to_string(),
+                value: "application/json, application/x-bcs".to_string(),
             }];
             RestReq {
                 method: HttpMethod::GET,
@@ -89,7 +91,7 @@ pub fn build_rest_req(req: AtosRequest) -> RestReq {
         AtosRequest::SubmitTransaction { txn } => {
             let headers = vec![HttpHeader {
                 name: "Content-Type".to_string(),
-                value: "Accept: application/json, application/x-bcs".to_string(),
+                value: "application/x.aptos.signed_transaction+bcs".to_string(),
             }];
             let txn_payload = bcs::to_bytes(&txn).expect("Failed to serialize transaction");
             RestReq {
@@ -102,7 +104,7 @@ pub fn build_rest_req(req: AtosRequest) -> RestReq {
         AtosRequest::GetTransactionByHash { txn_hash } => {
             let headers = vec![HttpHeader {
                 name: "Content-Type".to_string(),
-                value: "Accept: application/json, application/x-bcs".to_string(),
+                value: "application/json, application/x-bcs".to_string(),
             }];
             RestReq {
                 method: HttpMethod::GET,
@@ -114,6 +116,27 @@ pub fn build_rest_req(req: AtosRequest) -> RestReq {
                     txn_hash
                 ),
                 body: None,
+            }
+        }
+        AtosRequest::GetFaObj {
+            view_func,
+            token_id,
+        } => {
+            let headers = vec![HttpHeader {
+                name: "Content-Type".to_string(),
+                value: "application/json".to_string(),
+            }];
+            let req_body = json!({
+               "function": view_func,
+               "type_arguments": [],
+               "arguments": [token_id],
+
+            });
+            RestReq {
+                method: HttpMethod::POST,
+                headers,
+                url: format!("{}/{}/view", provider.url(), APTOS_API_VERSION),
+                body: Some(req_body.to_string().as_bytes().to_vec()),
             }
         }
     };

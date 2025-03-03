@@ -1,10 +1,9 @@
 #![allow(unused)]
 use super::{fecth_directive, mint_token};
 use crate::constants::CLEAR_INTERVAL;
-use crate::handler::burn_token;
-use crate::handler::clear_ticket;
+
 use crate::handler::fetch_ticket;
-use crate::handler::update_token_meta;
+use crate::handler::update_token;
 
 use crate::config::mutate_config;
 use crate::{
@@ -30,8 +29,6 @@ pub fn start_schedule(tasks: Option<Vec<TaskType>>) {
             update_token_meta_task();
             fetch_tickets_task();
             mint_token_task();
-            clear_ticket_task();
-            burn_token_task();
         }
         Some(tasks) => {
             for task in tasks {
@@ -40,8 +37,6 @@ pub fn start_schedule(tasks: Option<Vec<TaskType>>) {
                     TaskType::UpdateToken => update_token_meta_task(),
                     TaskType::GetTickets => fetch_tickets_task(),
                     TaskType::MintToken => mint_token_task(),
-                    TaskType::ClearTicket => clear_ticket_task(),
-                    TaskType::BurnToken => burn_token_task(),
                 }
             }
         }
@@ -102,47 +97,6 @@ fn mint_token_task() {
     });
 }
 
-fn clear_ticket_task() {
-    //clear ticket from port
-    let clr_ticket_timer_id = ic_cdk_timers::set_timer_interval(CLEAR_INTERVAL, || {
-        ic_cdk::spawn(async {
-            let _guard = match TimerGuard::new(TaskType::ClearTicket) {
-                Ok(guard) => guard,
-                Err(e) => {
-                    log!(WARNING, "TaskType::ClearTicket error : {:?}", e);
-                    return;
-                }
-            };
-
-            clear_ticket::clear_ticket_from_port().await;
-        });
-    });
-    log!(DEBUG, "ClearTicket task id : {:?}", clr_ticket_timer_id);
-    TIMER_GUARD.with_borrow_mut(|guard| {
-        guard.insert(TaskType::ClearTicket, clr_ticket_timer_id);
-    });
-}
-
-fn burn_token_task() {
-    //clear ticket from port
-    let burn_token_timer_id = ic_cdk_timers::set_timer_interval(CLEAR_INTERVAL, || {
-        ic_cdk::spawn(async {
-            let _guard = match TimerGuard::new(TaskType::BurnToken) {
-                Ok(guard) => guard,
-                Err(e) => {
-                    log!(WARNING, "TaskType::BurnToken error : {:?}", e);
-                    return;
-                }
-            };
-            burn_token::burn_token().await;
-        });
-    });
-    log!(DEBUG, "BurnToken task id : {:?}", burn_token_timer_id);
-    TIMER_GUARD.with_borrow_mut(|guard| {
-        guard.insert(TaskType::BurnToken, burn_token_timer_id);
-    });
-}
-
 fn fetch_tickets_task() {
     // query_tickets task
     let query_ticket_timer_id = ic_cdk_timers::set_timer_interval(QUERY_TICKET_INTERVAL, || {
@@ -175,7 +129,7 @@ fn update_token_meta_task() {
                     return;
                 }
             };
-            update_token_meta::update_token().await;
+            update_token::update_token().await;
         });
     });
     log!(DEBUG, "UpdateToken task id: {:?}", update_token_timer_id);

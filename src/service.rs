@@ -3,7 +3,11 @@
 use crate::aptos_client::aptos_providers::Provider;
 use crate::aptos_client::constants::DEVNET_CHAIN_ID;
 use crate::aptos_client::rest_client::{RestClient, RpcResult};
-use crate::aptos_client::{rest_client, transfer, Account, AccountKey, AptosResult, LocalAccount};
+
+use crate::aptos_client::{
+    rest_client, transfer, tx_builder, Account, AccountKey, AptosResult, CreateTokenReq,
+    LocalAccount, TxOptions, TxReq,
+};
 use crate::auth::{is_admin, set_perms, Permission};
 use crate::call_error::{CallError, Reason};
 use crate::ck_eddsa::KeyType;
@@ -32,10 +36,9 @@ use serde_json::json;
 use crate::lifecycle::{self, RouteArg, UpgradeArgs};
 
 use crate::config::{
-    mutate_config, read_config, AptosPortAction, MultiRpcConfig, RouteConfig, Seqs, SnorKeyType,
-    KEY_TYPE_NAME,
+    mutate_config, read_config, MultiRpcConfig, RouteConfig, Seqs, SnorKeyType, NATIVE_KEY_TYPE,
 };
-use crate::state::{replace_state, AptosToken, RouteState, TokenResp, UpdateType};
+use crate::state::{replace_state, AptosPort, AptosToken, RouteState, TokenResp, UpdateType};
 use crate::types::{TicketId, Token, TokenId};
 // use crate::service::mint_token::MintTokenRequest;
 
@@ -83,7 +86,7 @@ fn init(args: RouteArg) {
     ic_cdk_timers::set_timer(Duration::ZERO, || {
         ic_cdk::spawn(async move {
             let seed = get_random_seed().await;
-            mutate_state(|s| s.seeds.insert(KEY_TYPE_NAME.to_string(), seed));
+            mutate_state(|s| s.seeds.insert(NATIVE_KEY_TYPE.to_string(), seed));
         });
     });
 }
@@ -194,14 +197,18 @@ pub async fn aptos_route_address(key_type: SnorKeyType) -> Result<String, String
         SnorKeyType::Native => {
             let seed = read_state(|s| {
                 s.seeds
-                    .get(&KEY_TYPE_NAME.to_string())
-                    .unwrap_or_else(|| panic!("No key with name {:?}", &KEY_TYPE_NAME.to_string()))
+                    .get(&NATIVE_KEY_TYPE.to_string())
+                    .unwrap_or_else(|| {
+                        panic!("No key with name {:?}", &NATIVE_KEY_TYPE.to_string())
+                    })
             });
             KeyType::Native(seed.to_vec())
         }
     };
     // let address = ck_eddsa::aptos_route_address(key_type).await?;
-    let account_key = AccountKey::account_key(key_type).await?;
+    let account_key = AccountKey::account_key(key_type)
+        .await
+        .map_err(|e| e.to_string())?;
     let account_address = account_key.authentication_key().account_address();
     let address = format!("{}", account_address);
     Ok(address)
@@ -239,6 +246,16 @@ pub async fn update_rpc_provider(provider: Provider) {
     })
 }
 
+// devops method
+#[update(guard = "is_admin")]
+pub async fn update_tx_option(tx_opt: TxOptions) {
+    mutate_config(|s| {
+        let mut config = s.get().to_owned();
+        config.tx_opt = tx_opt;
+        s.set(config);
+    })
+}
+
 // query supported chain list
 #[query]
 fn get_chain_list() -> Vec<Chain> {
@@ -254,7 +271,6 @@ fn get_chain_list() -> Vec<Chain> {
 // query supported chain list
 #[query]
 fn get_token_list() -> Vec<TokenResp> {
-    //TODO: check sui token state
     read_state(|s| {
         s.tokens
             .iter()
@@ -284,36 +300,26 @@ pub async fn update_gas_budget(gas_budget: u64) {
     })
 }
 
-#[query]
-pub async fn aptos_port_info() -> AptosPortAction {
-    read_config(|s| s.get().sui_port_action.to_owned())
-}
-
 // devops method
-// after deploy or upgrade the sui port contract, call this interface to update sui token info
 #[update(guard = "is_admin")]
-pub async fn update_aptos_port_info(action: AptosPortAction) {
+pub async fn update_port_package(package: String) {
     mutate_config(|s| {
         let mut config = s.get().to_owned();
-        config.sui_port_action = action;
+        config.current_port_package = Some(package);
         s.set(config);
     })
 }
 
 #[query]
-pub async fn aptos_token(token_id: TokenId) -> Option<AptosToken> {
-    read_state(|s| s.sui_tokens.get(&token_id))
+pub async fn aptos_ports() -> Vec<AptosPort> {
+    read_state(|s| s.aptos_ports.iter().map(|(_, port)| port).collect())
 }
 
 // devops method
 // after deploy or upgrade the sui port contract, call this interface to update sui token info
 #[update(guard = "is_admin")]
-pub async fn update_aptos_token(token_id: TokenId, sui_token: AptosToken) -> Result<(), String> {
-    mutate_state(|s| {
-        s.sui_tokens.insert(token_id.to_string(), sui_token);
-    });
-
-    Ok(())
+pub async fn add_aptos_port(port: AptosPort) {
+    mutate_state(|s| s.aptos_ports.insert(port.package.to_owned(), port));
 }
 
 // devops method, add token manually
@@ -341,6 +347,22 @@ fn update_token(token: Token) -> Result<Option<Token>, CallError> {
             .insert(token.token_id.to_string(), token.to_owned())),
     })
     // Ok(())
+}
+
+#[query]
+pub async fn aptos_token(token_id: TokenId) -> Option<AptosToken> {
+    read_state(|s| s.atptos_tokens.get(&token_id))
+}
+
+// devops method
+// after deploy or upgrade the sui port contract, call this interface to update sui token info
+#[update(guard = "is_admin")]
+pub async fn update_aptos_token(token_id: TokenId, aptos_token: AptosToken) -> Result<(), String> {
+    mutate_state(|s| {
+        s.atptos_tokens.insert(token_id.to_string(), aptos_token);
+    });
+
+    Ok(())
 }
 
 // devops method
@@ -468,16 +490,11 @@ pub fn debug(enable: bool) {
 
 #[update(guard = "is_admin")]
 pub async fn get_account(address: String, ledger_version: Option<u64>) -> Result<String, String> {
-    let (provider, nodes, forward) = read_config(|s| {
-        (
-            s.get().rpc_provider.to_owned(),
-            s.get().nodes_in_subnet,
-            s.get().forward.to_owned(),
-        )
-    });
-    let client = RestClient::new(provider, Some(nodes));
+    let client = RestClient::new();
 
-    let ret = client.get_account(address, ledger_version, forward).await;
+    let ret = client
+        .get_account(address, ledger_version, &client.forward)
+        .await;
     log!(DEBUG, "[service::get_account] get_account ret: {:?}", ret);
     match ret {
         Ok(account) => {
@@ -496,17 +513,10 @@ pub async fn get_account_balance(
     address: String,
     asset_type: Option<String>,
 ) -> Result<u64, String> {
-    let (provider, nodes, forward) = read_config(|s| {
-        (
-            s.get().rpc_provider.to_owned(),
-            s.get().nodes_in_subnet,
-            s.get().forward.to_owned(),
-        )
-    });
-    let client = RestClient::new(provider, Some(nodes));
+    let client = RestClient::new();
 
     let ret = client
-        .get_account_balance(address, asset_type, forward)
+        .get_account_balance(address, asset_type, &client.forward)
         .await;
     log!(
         DEBUG,
@@ -527,90 +537,49 @@ pub async fn get_account_balance(
 }
 
 #[update(guard = "is_admin")]
-pub async fn verfy_txn(recipient: String, amount: u64, key_type: SnorKeyType) -> RpcResult<bool> {
+pub async fn get_fa_obj_from_port(
+    view_func: String,
+    token_id: String,
+) -> Result<Vec<String>, String> {
+    let client = RestClient::new();
+
+    let ret = client
+        .get_fa_obj(view_func, token_id, &client.forward)
+        .await;
     log!(
         DEBUG,
-        "[service::verfy_txn] recipient: {}, amount: {}, keyt_type: {:?}",
-        recipient,
-        amount,
-        key_type
+        "[service::get_fa_obj_from_port] get_fa_obj ret: {:?}",
+        ret
     );
-    let (provider, nodes, forward) = read_config(|s| {
-        (
-            s.get().rpc_provider.to_owned(),
-            s.get().nodes_in_subnet,
-            s.get().forward.to_owned(),
-        )
-    });
-    let key_type = match key_type {
-        SnorKeyType::ChainKey => KeyType::ChainKey,
-        SnorKeyType::Native => {
-            let seed = read_state(|s| {
-                s.seeds
-                    .get(&KEY_TYPE_NAME.to_string())
-                    .unwrap_or_else(|| panic!("No key with name {:?}", &KEY_TYPE_NAME.to_string()))
-            });
-            KeyType::Native(seed.to_vec())
+    match ret {
+        Ok(fa_obj) => Ok(fa_obj),
+        Err(e) => {
+            log!(
+                DEBUG,
+                "[service::get_fa_obj_from_port] get_fa_obj_from_port error : {:?}",
+                e
+            );
+            Err(format!("Error get fa obj from port: {:?}", e))
         }
-    };
-    let mut local_account = LocalAccount::local_account(key_type).await;
-    log!(
-        DEBUG,
-        "[service::verfy_txn] local_account: {:?} ",
-        local_account
-    );
-    let to_account = AccountAddress::from_str(&recipient).unwrap();
-    log!(DEBUG, "[service::verfy_txn] to_account: {:?} ", to_account);
-    // devnet chain id is 174
-    // let chain_id = 174;
-    let txn = transfer::get_signed_transfer_txn(
-        DEVNET_CHAIN_ID,
-        &mut local_account,
-        to_account,
-        amount,
-        None,
-    )
-    .await
-    .unwrap();
-    log!(DEBUG, "[service::verfy_txn] SignedTransaction: {:#?} ", txn);
-    match txn.verify_signature() {
-        Ok(_) => Ok(true),
-        Err(_) => Ok(false),
     }
 }
 
 #[update(guard = "is_admin")]
-pub async fn transfer_aptos_from_route(
+pub async fn transfer_aptos(
     recipient: String,
     amount: u64,
     key_type: SnorKeyType,
 ) -> Result<String, String> {
-    let (provider, nodes, forward) = read_config(|s| {
-        (
-            s.get().rpc_provider.to_owned(),
-            s.get().nodes_in_subnet,
-            s.get().forward.to_owned(),
-        )
-    });
 
-    let key_type = match key_type {
-        SnorKeyType::ChainKey => KeyType::ChainKey,
-        SnorKeyType::Native => {
-            let seed = read_state(|s| {
-                s.seeds
-                    .get(&KEY_TYPE_NAME.to_string())
-                    .unwrap_or_else(|| panic!("No key with name {:?}", &KEY_TYPE_NAME.to_string()))
-            });
-            KeyType::Native(seed.to_vec())
-        }
-    };
-    let mut local_account = LocalAccount::local_account(key_type).await;
+    let mut local_account = LocalAccount::local_account()
+        .await
+        .map_err(|e| e.to_string())?;
     log!(
         DEBUG,
         "[service::transfer_aptos] local_account: {:?} ",
         local_account
     );
-    let to_account = AccountAddress::from_str(&recipient).unwrap();
+    let to_account = AccountAddress::from_str(&recipient).map_err(|e| e.to_string())?;
     log!(
         DEBUG,
         "[service::transfer_aptos] to_account: {:?} ",
@@ -626,25 +595,17 @@ pub async fn transfer_aptos_from_route(
         None,
     )
     .await
-    .unwrap();
+    .map_err(|e| e.to_string())?;
     log!(
         DEBUG,
         "[service::transfer_aptos] SignedTransaction: {:#?} ",
         txn
     );
     // transfer the aptos coin to a different address
-    let client = RestClient::new(provider, Some(nodes));
-    let ret = client.transfer_aptos(&txn, forward).await;
+    let client = RestClient::new();
+    let ret = client.summit_tx(&txn, &client.forward).await;
     log!(DEBUG, "[service::transfer_aptos] result: {:#?} ", ret);
 
-    //increase sequence number
-    // let latest_tx_seq = local_account.increment_sequence_number();
-    // let latest_tx_seq = local_account.sequence_number();
-    // mutate_config(|s| {
-    //     let mut config = s.get().to_owned();
-    //     config.seqs.tx_seq = latest_tx_seq;
-    //     s.set(config);
-    // });
     match ret {
         Ok(pending_tx) => {
             let pending_tx_json = serde_json::to_string(&pending_tx).map_err(|e| e.to_string())?;
@@ -657,18 +618,60 @@ pub async fn transfer_aptos_from_route(
     }
 }
 
+//just for test and devops
+#[update(guard = "is_admin")]
+pub async fn submit_tx(req: TxReq) -> Result<String, String> {
+    log!(DEBUG, "[service::submit_tx] TxReq: {:?} ", req);
+
+    let mut local_account = LocalAccount::local_account()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    log!(
+        DEBUG,
+        "[service::submit_tx] local_account: {:?} ",
+        local_account
+    );
+
+    let signed_txn = tx_builder::get_signed_tx(&mut local_account, req, None)
+        .await
+        .map_err(|e| e.to_string())?;
+    log!(
+        DEBUG,
+        "[service::submit_tx] SignedTransaction: {:#?} ",
+        signed_txn
+    );
+
+    //verify tx sinature
+    match signed_txn.verify_signature() {
+        Ok(_) => ..,
+        Err(e) => return Err(e.to_string()),
+    };
+    // transfer the aptos coin to a different address
+    let client = RestClient::new();
+    let ret = client.summit_tx(&signed_txn, &client.forward).await;
+    log!(DEBUG, "[service::submit_tx] result: {:#?} ", ret);
+
+    match ret {
+        Ok(pending_tx) => {
+            let pending_tx_json = serde_json::to_string(&pending_tx).map_err(|e| e.to_string())?;
+            Ok(pending_tx_json)
+        }
+        Err(e) => {
+            log!(DEBUG, "[service::submit_tx] ret error : {:?}", e);
+            Err(format!("Error submit_tx: {:?}", e))
+        }
+    }
+}
+
+// devops
 #[update(guard = "is_admin")]
 pub async fn get_transaction_by_hash(txn_hash: String) -> Result<String, String> {
-    let (provider, nodes, forward) = read_config(|s| {
-        (
-            s.get().rpc_provider.to_owned(),
-            s.get().nodes_in_subnet,
-            s.get().forward.to_owned(),
-        )
-    });
-    let client = RestClient::new(provider, Some(nodes));
+    let client = RestClient::new();
 
-    let ret = client.get_transaction_by_hash(txn_hash, forward).await;
+    let ret = client
+        .get_transaction_by_hash(txn_hash, &client.forward)
+        .await;
     log!(
         DEBUG,
         "[service::get_transaction_by_hash] get_transaction_by_hash ret: {:?}",
@@ -690,29 +693,9 @@ pub async fn get_transaction_by_hash(txn_hash: String) -> Result<String, String>
     }
 }
 
-/// Cleans up the HTTP response headers to make them deterministic.
-///
-/// # Arguments
-///
-/// * `args` - Transformation arguments containing the HTTP response.
-///
 #[query(hidden = true)]
 fn cleanup_response(mut args: TransformArgs) -> TransformedHttpResponse {
-    // The response header contains non-deterministic fields that make it impossible to reach consensus!
-    // Errors seem deterministic and do not contain data that can break consensus.
-    // Clear non-deterministic fields from the response headers.
-
-    // log!(
-    //     DEBUG,
-    //     "[service::cleanup_response] cleanup_response TransformArgs: {:?}",
-    //     args
-    // );
     args.response.headers.clear();
-    // log!(
-    //     DEBUG,
-    //     "[service::cleanup_response] response.headers: {:?}",
-    //     args.response.headers
-    // );
     args.response
 }
 

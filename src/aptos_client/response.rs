@@ -1,8 +1,3 @@
-// Copyright © Aptos Foundation
-// SPDX-License-Identifier: Apache-2.0
-
-use super::types::State;
-
 #[derive(Debug)]
 pub struct Response<T> {
     inner: T,
@@ -21,14 +16,6 @@ impl<T> Response<T> {
     pub fn into_inner(self) -> T {
         self.inner
     }
-
-    // pub fn state(&self) -> &State {
-    //     &self.state
-    // }
-
-    // pub fn into_parts(self) -> (T, State) {
-    //     (self.inner, self.state)
-    // }
 
     pub fn and_then<U, E, F>(self, f: F) -> Result<Response<U>, E>
     where

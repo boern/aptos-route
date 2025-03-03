@@ -1,7 +1,6 @@
-use crate::handler::clear_ticket::ClearTx;
-use crate::ic_sui::rpc_client::{RpcClient, RpcError};
-use crate::ic_sui::sui_json_rpc_types::sui_transaction::{SuiExecutionStatus, SuiTransactionBlockEffectsAPI, SuiTransactionBlockResponse};
-use crate::ic_sui::sui_types::base_types::SuiAddress;
+
+use crate::aptos_client::rest_client::RestClient;
+use crate::aptos_client::{tx_builder, LocalAccount, MintTokenReq, TxReq};
 use crate::types::{ Error,TicketId};
 use candid::{ CandidType, Principal};
 
@@ -9,7 +8,7 @@ use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
 
 use std::borrow::Cow;
-use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 use crate::state::TxStatus;
@@ -40,7 +39,7 @@ pub struct MintTokenRequest {
     pub recipient: String,
     pub amount: u64,
     pub status: TxStatus,
-    pub digest: Option<String>,
+    pub tx_hash: Option<String>,
     pub object: Option<String>,
     pub retry:u64,
 }
@@ -81,7 +80,7 @@ pub async fn mint_token() {
                     recipient: ticket.receiver.to_owned(),
                     amount: ticket.amount.parse::<u64>().unwrap(),
                     status: TxStatus::New,
-                    digest: None,
+                    tx_hash: None,
                     object:None,
                     retry:0
                 };
@@ -108,7 +107,8 @@ pub async fn mint_token() {
 
         match &mint_req.status {
             TxStatus::New => {
-                handle_mint_token(mint_req).await;
+               
+                inner_mint_token(&mint_req).await;
                 
               
             },
@@ -118,6 +118,10 @@ pub async fn mint_token() {
                     "[mint_token::mint_token] the mint token request ({:?}) is handling, pls wait ...",
                     mint_req
                 );
+                let tx_hash = mint_req.tx_hash.expect("Not found tx hash");
+                 // update status
+                 update_tx_status(tx_hash, mint_req.token_id.to_owned()).await;
+      
                
             }
             TxStatus::Finalized  => {
@@ -130,12 +134,11 @@ pub async fn mint_token() {
                 //only finalized mint_req, remove the handled ticket from queue  
                 mutate_state(|s|{ 
                     s.tickets_queue.remove(&seq);
-                    //add clear ticket
-                    s.clr_ticket_queue.insert(mint_req.ticket_id.to_owned(), ClearTx::new())
+                   
                 });
-                // update tx digest to hub
+                // update tx hash to hub
                 let hub_principal = read_config(|s| s.get().hub_principal);
-                let digest = mint_req.digest.unwrap();
+                let digest = mint_req.tx_hash.unwrap();
                        
                 match update_tx_to_hub(hub_principal, ticket.ticket_id.to_string(), digest.to_owned()).await {
                    Ok(()) =>{
@@ -163,7 +166,7 @@ pub async fn mint_token() {
                        "[mint_token::mint_token] failed to mint token for ticket id: {}, error: {:} , and retry ... ",
                         ticket.ticket_id,e 
                     );
-                    handle_mint_token(mint_req).await;
+                    inner_mint_token(&mint_req).await;
                 } 
             },
             
@@ -172,146 +175,140 @@ pub async fn mint_token() {
     }
 }
 
-pub async fn handle_mint_token(mint_req: MintTokenRequest){
-    match mint_to_with_req(mint_req.to_owned()).await {
-        Ok(tx_resp) => {
-            log!(
-                DEBUG,
-                "[mint_token::handle_mint_token] mint token req was submited for ticket id: {} and tx_resp: {:?} ",
-                mint_req.ticket_id.to_string(),tx_resp);
-            //check tx status
-            match tx_resp.effects {
-                None => {
-                    log!(
-                        ERROR,
-                        "[mint_token::handle_mint_token] Not Found tx effects and retry ... ",
-                    );
-                
-                    mutate_state(|s| {
-                        if let Some(req)=s.mint_token_requests.get(&mint_req.ticket_id).as_mut() {
-                            req.status =TxStatus::TxFailed { e: " Not Found effects in tx response".to_string() };
-                            req.retry +=1;
-                            // req.digest = None;
-                            s.mint_token_requests.insert(mint_req.ticket_id.to_string(),req.to_owned());
-                        }
-                    });
-                }
-                Some(effects) => match effects.status() {
-                    SuiExecutionStatus::Success => {
-                        log!(
-                            DEBUG,
-                            "[mint_token::handle_mint_token] mint token req for ticket id: {} successfully!",
-                            mint_req.ticket_id.to_string()
-                        );
-                        mutate_state(|s| {
-                            if let Some(req)=s.mint_token_requests.get(&mint_req.ticket_id).as_mut() {
-                                req.status= TxStatus::Finalized ;
-                                req.digest = Some(tx_resp.digest.to_string());
-                                //TODO: update object id
-                                s.mint_token_requests.insert(mint_req.ticket_id.to_string(),req.to_owned());
-                            }
-                        });
 
+pub async fn inner_mint_token(mint_req:&MintTokenRequest) {
+
+    let fa_obj_id = read_state(|s|s.atptos_tokens.get(&mint_req.token_id)).expect("aptos token is None").fa_obj_id.expect("fa obj id is None");
+    let req = MintTokenReq {
+         ticket_id: mint_req.ticket_id.to_owned(),
+        fa_obj: fa_obj_id,
+        recipient: mint_req.recipient.to_owned(),
+        mint_acmount: mint_req.amount,
+    };
+    match  LocalAccount::local_account().await{
+        Ok(mut local_account) => {
+            let tx_req = TxReq::MintToken(req);
+            if let Ok(signed_txn) = tx_builder::get_signed_tx(&mut local_account, tx_req, None)
+                .await {
+                    log!(
+                        DEBUG,
+                        "[mint_token::inner_mint_token] SignedTransaction: {:#?} ",
+                        signed_txn
+                    );
+                    let client = RestClient::new();
+                    match client.summit_tx(&signed_txn, &client.forward).await {
+                        Ok(tx) => {
+                            log!(
+                                DEBUG,
+                                "[mint_token::inner_mint_token] summit_tx ret: {:?}  ",
+                                tx
+                            );
+               
+                            mutate_state(|s| {
+                                if let Some(req)=s.mint_token_requests.get(&mint_req.ticket_id).as_mut() {
+                                    req.status= TxStatus::Pending;
+                                    req.tx_hash = Some(tx.hash.to_string());
+                                 
+                                    s.mint_token_requests.insert(mint_req.ticket_id.to_owned(),req.to_owned());
+                                }
+                            });
+                        }
+                        Err(tx_error) => {
+                            log!(
+                                ERROR,
+                                "[mint_token::inner_mint_token] summit_tx error: {:?}  ",
+                                tx_error
+                            );
+                   
+                            // update retry
+                         
+                            mutate_state(|s| {
+                                if let Some(req)=s.mint_token_requests.get(&mint_req.ticket_id).as_mut() {
+                                    req.status =TxStatus::TxFailed { e: tx_error.to_string() };
+                                    req.retry +=1;
+                                    s.mint_token_requests.insert(mint_req.ticket_id.to_string(),req.to_owned());
+                                }
+                            });
+                        }
                     }
-                    SuiExecutionStatus::Failure { error } => {
-                        log!(
-                            ERROR,
-                            "[mint_token::handle_mint_token] sui tx execute failured: {} ",error
-                        );
-                        mutate_state(|s| {
-                            if let Some(req)=s.mint_token_requests.get(&mint_req.ticket_id).as_mut() {
-                                req.status =TxStatus::TxFailed { e: error.to_owned() };
-                                req.retry +=1;
-                                s.mint_token_requests.insert(mint_req.ticket_id.to_string(),req.to_owned());
-                            }
-                        });
-                    }
+
+            } else {
+                    log!(
+                        DEBUG,
+                        "[mint_token::inner_mint_token] get_signed_tx error",
+                    );
                 }
+        }
+        Err(e) => {
+            log!(
+                ERROR,
+                "[mint_token::inner_mint_token] get local_account error: {:?}  ",
+                e
+            );
+        }
+    }
+   
+}
+
+
+pub async fn update_tx_status(tx_hash: String, ticket_id: String) {
+    // query signature status
+    let client = RestClient::new();
+    let tx = client.get_transaction_by_hash(tx_hash.to_owned(), &client.forward).await;
+    match tx {
+        Err(e) => {
+            log!(
+                WARNING,
+                "[mint_token::update_tx_status] get_transaction_by_hash for {} ,err: {:?}",
+                tx_hash,
+                e
+            );
+            
+        }
+        Ok(tx) => {
+            if tx.is_pending() {
+                log!(
+                    DEBUG,
+                    "[mint_token::update_tx_status] tx {} is pending, pls waiting ...",
+                    tx_hash.to_string(),
+                    
+                );
+                return
+            }
+            if tx.success() {
+                log!(
+                    DEBUG,
+                    "[mint_token::update_tx_status] mint token req for ticket id: {} successfully!",
+                    ticket_id
+                );
+                mutate_state(|s| {
+                    if let Some(req)=s.mint_token_requests.get(&ticket_id).as_mut() {
+                        req.status= TxStatus::Finalized ;
+                        s.mint_token_requests.insert(ticket_id.to_owned(),req.to_owned());
+                    }
+                });
+            } else {
+               // update status and retry
+               log!(
+                ERROR,
+                    "[mint_token::update_tx_status] tx execute failured: {} ",tx.vm_status()
+                );
+                mutate_state(|s| {
+                    if let Some(req)=s.mint_token_requests.get(&ticket_id).as_mut() {
+                        req.status =TxStatus::TxFailed { e: tx.vm_status() };
+                        req.retry +=1;
+                        req.tx_hash= None;
+                        s.mint_token_requests.insert(ticket_id.to_string(),req.to_owned());
+                    }
+                });
+                
             }
           
         }
-        Err(e) => { 
-            let error = format!( "[mint_token::mint_token] failed to mint token for ticket id: {}, rpc error: {:?}",
-            mint_req.ticket_id,e);
-            log!(ERROR,"{}", error.to_string());
-
-            // if err, update req status 
-            mutate_state(|s| {
-                    if let Some(req)=s.mint_token_requests.get(&mint_req.ticket_id).as_mut() {
-                        req.status =TxStatus::TxFailed { e: error };
-                        req.retry +=1;
-                        s.mint_token_requests.insert(mint_req.ticket_id.to_string(),req.to_owned());
-                    }
-                });
-
-        }
-
     }
-    
-}
-
-/// send tx to sui for mint token
-pub async fn mint_to_with_req(req: MintTokenRequest) -> Result<SuiTransactionBlockResponse,RpcError> {
-   
-    // update status to pending
-    mutate_state(|s| {
-        let new_req = MintTokenRequest {
-            status: TxStatus::Pending,
-            ..req.to_owned()
-          
-        };
-        s.mint_token_requests
-            .insert(req.ticket_id.to_owned(), new_req);
-    });
-
-    let sui_token = read_state(|s| s.sui_tokens.get(&req.token_id)).expect("sui token should exists");
-    let recipient = SuiAddress::from_str(&req.recipient).map_err(|e| RpcError::Text(e.to_string()))?;
-    let (action,provider, nodes, gas_budget,forward) = read_config(|s| {
-        (   
-            s.get().sui_port_action.to_owned(),
-            s.get().rpc_provider.to_owned(),
-            s.get().nodes_in_subnet,
-            s.get().gas_budget,
-            s.get().forward.to_owned(),
-        )
-    });
-    let client = RpcClient::new(provider, Some(nodes));
-    let tx_resp = client.mint_with_ticket(action,req.ticket_id,
-        sui_token,
-        recipient,
-        req.amount,
-        Some(gas_budget),
-        forward,
-        )
-        .await?;
-
-    Ok(tx_resp)
 }
 
 
-/// send tx to sui for mint token
-pub async fn remove_ticket_from_port(ticket_id: String) {
-   let (action,provider, nodes, gas_budget,forward) = read_config(|s| {
-        (   
-            s.get().sui_port_action.to_owned(),
-            s.get().rpc_provider.to_owned(),
-            s.get().nodes_in_subnet,
-            s.get().gas_budget,
-            s.get().forward.to_owned(),
-        )
-    });
-    let client = RpcClient::new(provider, Some(nodes));
-    let tx_resp = client.remove_ticket(action,ticket_id.to_owned(),
-        Some(gas_budget),
-        forward,
-        )
-        .await;
-    log!(
-        DEBUG,
-        "[mint_token::remove_ticket_from_port] remove ticket id: {} from port result: {:?} ",ticket_id,tx_resp
-    );  
-  
-}
 
 pub async fn update_tx_to_hub(
     hub_principal: Principal,
@@ -334,40 +331,8 @@ pub async fn update_tx_to_hub(
 
 #[cfg(test)]
 mod test {
-
-    #[test]
-    fn test_match_tx_error() {
-            let log_message = r#"
-            TxFailed { e: \"management call '[solana_rpc::create_mint_account] create_mint_with_metaplex' failed: canister error: TxError: block_hash=B9p4ZCrQuWqbWFdhTx3ZseunFiV1sNQ5ZyjEZvuKNjbJ, signature=5o1BYJ76Yx65U3brvkuFwkJ4LkZVev28337mq8u4eg2Vi8S2DBjvSn9LuNuuNp5Gqi1D3BDexmRRHjYM6NdhWAVW, error=[solana_client::send_raw_transaction] rpc error: RpcResponseError { code: -32002, message: \\\"Transactionsimulationfailed: Blockhashnotfound\\\", data: None }\" } 
-            "#;
-            if log_message.contains("Transactionsimulationfailed: Blockhashnotfound") {
-                println!("{}", log_message);
-            } else {
-                println!("not found");
-            }
-
-            if log_message.contains("Transactionsimulationfailed") {
-                println!("{}", log_message);
-            } else {
-                println!("not found");
-            }
-    }
-
     #[test]
     fn test_match_status_error() {
-            let log_message = r#"
-          TxFailed { e: \"management call 'sol_getSignatureStatuses' failed: canister error: parse error: expected invalid type: null, expected struct TransactionStatus at line 1 column 91\" }
-            "#;
-            if log_message.contains("expected invalid type: null") {
-                println!("{}", log_message);
-            } else {
-                println!("not found");
-            }
-
-            if log_message.contains("expected struct TransactionStatus") {
-                println!("{}", log_message);
-            } else {
-                println!("not found");
-            }
+        
     }
 }

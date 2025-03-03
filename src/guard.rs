@@ -11,8 +11,8 @@ pub enum TaskType {
 
     UpdateToken,
     MintToken,
-    ClearTicket,
-    BurnToken,
+    // ClearTicket,
+    // BurnToken,
 }
 
 #[derive(Debug, PartialEq, Eq)]

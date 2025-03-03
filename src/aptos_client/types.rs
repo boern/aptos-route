@@ -1,8 +1,8 @@
 #![allow(unused)]
-use crate::config::{mutate_config, read_config, AptosPortAction, KEY_TYPE_NAME};
+use crate::config::{mutate_config, read_config, NATIVE_KEY_TYPE};
 use crate::constants::{
-    BURN_FUNC, COIN_MODULE, COIN_PKG_ID, DEFAULT_GAS_BUDGET, MINT_FUNC, MINT_WITH_TICKET_FUNC,
-    SUI_COIN, UPDATE_DESC_FUNC, UPDATE_ICON_FUNC, UPDATE_NAME_FUNC, UPDATE_SYMBOL_FUNC,
+    COIN_MODULE, COIN_PKG_ID, DEFAULT_GAS_BUDGET, MINT_WITH_TICKET_FUNC, SUI_COIN,
+    UPDATE_DESC_FUNC, UPDATE_ICON_FUNC, UPDATE_NAME_FUNC, UPDATE_SYMBOL_FUNC,
 };
 use crate::ic_log::{DEBUG, ERROR};
 
@@ -36,17 +36,19 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use crate::ck_eddsa::{self, KeyType};
+use anyhow::{Context, Result};
 pub use aptos_api_types::deserialize_from_string;
 use aptos_api_types::{Address, U64};
 
-use crate::ck_eddsa::{self, KeyType};
-
-use super::error::RestError;
+use super::constants::DEVNET_CHAIN_ID;
+use super::error::AptosRouteError;
+use super::rest_client::RestClient;
 use super::tx_builder::TransactionBuilder;
 use aptos_api_types::AptosError;
 use move_core_types::{language_storage::StructTag, parser::parse_struct_tag};
 use serde_bytes::ByteBuf;
-pub type AptosResult<T> = Result<T, RestError>;
+pub type AptosResult<T> = Result<T, AptosRouteError>;
 
 #[derive(Debug)]
 pub enum LocalAccountAuthenticator {
@@ -65,9 +67,11 @@ impl LocalAccountAuthenticator {
                     msg
                 );
                 let seed = read_state(|s| {
-                    s.seeds.get(&KEY_TYPE_NAME.to_string()).unwrap_or_else(|| {
-                        panic!("No key with name {:?}", &KEY_TYPE_NAME.to_string())
-                    })
+                    s.seeds
+                        .get(&NATIVE_KEY_TYPE.to_string())
+                        .unwrap_or_else(|| {
+                            panic!("No key with name {:?}", &NATIVE_KEY_TYPE.to_string())
+                        })
                 });
 
                 let sig_bytes = ck_eddsa::sign(msg.to_vec(), KeyType::Native(seed.to_vec()))
@@ -117,21 +121,31 @@ pub struct LocalAccount {
     sequence_number: AtomicU64,
 }
 impl LocalAccount {
-    pub async fn local_account(key_type: KeyType) -> Self {
-        let account_key = AccountKey::account_key(key_type.to_owned()).await.unwrap();
+    pub async fn local_account() -> AptosResult<LocalAccount> {
+        let key_type = read_config(|c| c.get().key_type.to_owned());
+        let account_key = AccountKey::account_key(key_type.to_owned()).await?;
         let address = account_key.authentication_key().account_address();
         let auth = match key_type {
             KeyType::ChainKey => LocalAccountAuthenticator::ChainKey(account_key),
             KeyType::Native(_) => LocalAccountAuthenticator::NativeKey(account_key),
         };
 
-        let tx_seq = read_config(|s| s.get().seqs.to_owned()).tx_seq;
-        let sequence_number = AtomicU64::new(tx_seq);
-        Self {
+        let client = RestClient::new();
+        let account = client
+            .get_account(format!("{}", address), None, &client.forward)
+            .await?;
+        log!(
+            DEBUG,
+            "[types::LocalAccount::local_account] get_account ret: {:?}",
+            account
+        );
+        // let tx_seq = read_config(|s| s.get().seqs.to_owned()).tx_seq;
+        let sequence_number = AtomicU64::new(account.sequence_number);
+        Ok(Self {
             address,
             auth,
             sequence_number,
-        }
+        })
     }
     pub fn address(&self) -> AccountAddress {
         self.address
@@ -145,6 +159,28 @@ impl LocalAccount {
         self.sequence_number.fetch_add(1, Ordering::SeqCst)
     }
 
+    pub async fn update_seq_from_chain(&mut self) -> AptosResult<u64> {
+        //
+        // let (provider, nodes, forward) = read_config(|s| {
+        //     (
+        //         s.get().rpc_provider.to_owned(),
+        //         s.get().nodes_in_subnet,
+        //         s.get().forward.to_owned(),
+        //     )
+        // });
+        let client = RestClient::new();
+        let account = client
+            .get_account(format!("{}", self.address), None, &client.forward)
+            .await?;
+        log!(
+            DEBUG,
+            "[types::LocalAccount::update_seq_from_chain] get_account ret: {:?}",
+            account
+        );
+        self.sequence_number = AtomicU64::new(account.sequence_number);
+        Ok(account.sequence_number)
+    }
+
     pub async fn sign_transaction(&self, txn: RawTransaction) -> SignedTransaction {
         self.auth.sign_transaction(txn).await
     }
@@ -153,6 +189,7 @@ impl LocalAccount {
         &self,
         builder: TransactionBuilder,
     ) -> SignedTransaction {
+        // let new_seq = self.increment_sequence_number()
         let raw_txn = builder
             .sender(self.address())
             .sequence_number(self.increment_sequence_number())
@@ -175,12 +212,12 @@ pub struct AccountKey {
     authentication_key: AuthenticationKey,
 }
 impl AccountKey {
-    pub async fn account_key(key_type: KeyType) -> Result<AccountKey, String> {
+    pub async fn account_key(key_type: KeyType) -> AptosResult<AccountKey> {
         match key_type {
             KeyType::ChainKey => {
                 let public_key_bytes = ck_eddsa::public_key_ed25519(key_type).await.unwrap();
                 let public_key = Ed25519PublicKey::try_from(public_key_bytes.as_slice())
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| AptosRouteError::AccountKeyError(e.into()))?;
                 let authentication_key = AuthenticationKey::ed25519(&public_key);
 
                 Ok(Self {
@@ -193,7 +230,8 @@ impl AccountKey {
             KeyType::Native(seed) => {
                 let seed_32_bytes =
                     <[u8; 32]>::try_from(&seed[0..32]).expect("seed should be >= 32 bytes");
-                let private_key = Ed25519PrivateKey::try_from(&seed_32_bytes[..]).unwrap();
+                let private_key = Ed25519PrivateKey::try_from(&seed_32_bytes[..])
+                    .map_err(|e| AptosRouteError::AccountKeyError(e.into()))?;
                 let public_key = Ed25519PublicKey::from(&private_key);
                 let authentication_key = AuthenticationKey::ed25519(&public_key);
 
@@ -385,13 +423,86 @@ pub fn parse_state_optional(response: &HttpResponse) -> Option<State> {
         .unwrap_or(None)
 }
 
-pub fn parse_error(response: HttpResponse) -> RestError {
+pub fn parse_error(response: HttpResponse) -> AptosRouteError {
     // let status_code: u16 = response.status.into();
     let status_code: u16 = response.status.to_owned().0.try_into().unwrap_or(500);
     let maybe_state = parse_state_optional(&response);
 
     match serde_json::from_slice::<AptosError>(response.body.as_slice()) {
         Ok(error) => (error, maybe_state, status_code).into(),
-        Err(e) => RestError::Json(e),
+        Err(e) => AptosRouteError::Json(e),
     }
+}
+
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+pub struct TxOptions {
+    pub max_gas_amount: u64,
+    pub gas_unit_price: u64,
+    /// This is the number of seconds from now you're willing to wait for the
+    /// transaction to be committed.
+    pub timeout_secs: u64,
+    pub chain_id: u8,
+}
+
+impl Default for TxOptions {
+    fn default() -> Self {
+        Self {
+            max_gas_amount: 5_000,
+            gas_unit_price: 150,
+            timeout_secs: 500,
+            chain_id: DEVNET_CHAIN_ID,
+        }
+    }
+}
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+pub struct CreateTokenReq {
+    pub token_id: String,
+    pub name: String,
+    pub symbol: String,
+    pub decimals: u8,
+    pub icon_uri: String,
+    pub max_supply: Option<u128>,
+    pub project_uri: String,
+}
+
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+pub struct UpdateMetaReq {
+    pub fa_obj: String,
+    pub name: Option<String>,
+    pub symbol: Option<String>,
+    pub decimals: Option<u8>,
+    pub icon_uri: Option<String>,
+    pub project_uri: Option<String>,
+}
+
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+pub struct MintTokenReq {
+    pub ticket_id: String,
+    pub fa_obj: String,
+    pub recipient: String,
+    pub mint_acmount: u64,
+}
+
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+pub struct BurnTokenReq {
+    pub fa_obj: String,
+    pub burn_acmount: u64,
+    pub memo: Option<String>,
+}
+
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+pub struct TransferReq {
+    pub recipient: String,
+    pub amount: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, CandidType)]
+pub enum TxReq {
+    CreateToken(CreateTokenReq),
+    UpdateMeta(UpdateMetaReq),
+    MintToken(MintTokenReq),
+    BurnToken(BurnTokenReq),
+    CollectFee(u64),
+    RemoveTicket(String),
+    // Transfer(TransferReq),
 }

@@ -1,19 +1,22 @@
-type AptosPortAction = record {
+type AptosPort = record {
+  port_owner : text;
   package : text;
-  upgrade_cap : text;
-  ticket_table : text;
-  port_owner_cap : text;
+  fee_addr : text;
   functions : vec text;
   module : text;
+  aptos_route : text;
 };
 type AptosToken = record {
-  treasury_cap : text;
-  metadata : text;
-  package : text;
-  upgrade_cap : text;
-  functions : vec text;
-  module : text;
-  type_tag : text;
+  status : TxStatus;
+  fa_obj_id : opt text;
+  type_tag : opt text;
+  tx_hash : opt text;
+  retry : nat64;
+};
+type BurnTokenReq = record {
+  memo : opt text;
+  fa_obj : text;
+  burn_acmount : nat64;
 };
 type Chain = record {
   fee_token : opt text;
@@ -26,6 +29,15 @@ type Chain = record {
 };
 type ChainState = variant { Active; Deactive };
 type ChainType = variant { SettlementChain; ExecutionChain };
+type CreateTokenReq = record {
+  decimals : nat8;
+  token_id : text;
+  project_uri : text;
+  name : text;
+  icon_uri : text;
+  max_supply : opt nat;
+  symbol : text;
+};
 type InitArgs = record {
   admin : principal;
   hub_principal : principal;
@@ -38,6 +50,12 @@ type InitArgs = record {
   nodes_in_subnet : opt nat32;
 };
 type KeyType = variant { Native : blob; ChainKey };
+type MintTokenReq = record {
+  recipient : text;
+  ticket_id : text;
+  mint_acmount : nat64;
+  fa_obj : text;
+};
 type MultiRpcConfig = record {
   rpc_list : vec text;
   minimum_response_count : nat32;
@@ -52,11 +70,10 @@ type Provider = variant {
 };
 type Result = variant { Ok : text; Err : text };
 type Result_1 = variant { Ok : nat64; Err : text };
-type Result_2 = variant { Ok; Err : text };
-type Result_3 = variant { Ok : bool; Err : RpcError };
+type Result_2 = variant { Ok : vec text; Err : text };
+type Result_3 = variant { Ok; Err : text };
 type RouteArg = variant { Upgrade : opt UpgradeArgs; Init : InitArgs };
 type RouteConfig = record {
-  sui_port_action : AptosPortAction;
   admin : principal;
   hub_principal : principal;
   caller_perms : vec record { text; Permission };
@@ -66,21 +83,17 @@ type RouteConfig = record {
   fee_account : text;
   seqs : Seqs;
   rpc_provider : Provider;
+  current_port_package : opt text;
   chain_id : text;
   schnorr_key_name : text;
   target_chain_factor : vec record { text; nat };
   multi_rpc_config : MultiRpcConfig;
   key_type : KeyType;
   chain_state : ChainState;
+  tx_opt : TxOptions;
   forward : opt text;
   nodes_in_subnet : nat32;
   fee_token_factor : opt nat;
-};
-type RpcError = variant {
-  Text : text;
-  HttpCallError : text;
-  ParseError : text;
-  RpcResponseError : record { code : int64; data : opt text; message : text };
 };
 type Seqs = record {
   next_directive_seq : nat64;
@@ -88,14 +101,7 @@ type Seqs = record {
   tx_seq : nat64;
 };
 type SnorKeyType = variant { Native; ChainKey };
-type TaskType = variant {
-  GetTickets;
-  ClearTicket;
-  BurnToken;
-  GetDirectives;
-  MintToken;
-  UpdateToken;
-};
+type TaskType = variant { GetTickets; GetDirectives; MintToken; UpdateToken };
 type Token = record {
   decimals : nat8;
   token_id : text;
@@ -111,6 +117,34 @@ type TokenResp = record {
   rune_id : opt text;
   symbol : text;
 };
+type TxOptions = record {
+  max_gas_amount : nat64;
+  chain_id : nat8;
+  gas_unit_price : nat64;
+  timeout_secs : nat64;
+};
+type TxReq = variant {
+  CreateToken : CreateTokenReq;
+  CollectFee : nat64;
+  RemoveTicket : text;
+  BurnToken : BurnTokenReq;
+  MintToken : MintTokenReq;
+  UpdateMeta : UpdateMetaReq;
+};
+type TxStatus = variant {
+  New;
+  Finalized;
+  TxFailed : record { e : text };
+  Pending;
+};
+type UpdateMetaReq = record {
+  decimals : opt nat8;
+  project_uri : opt text;
+  name : opt text;
+  icon_uri : opt text;
+  fa_obj : text;
+  symbol : opt text;
+};
 type UpgradeArgs = record {
   admin : opt principal;
   hub_principal : opt principal;
@@ -122,15 +156,17 @@ type UpgradeArgs = record {
   chain_state : opt ChainState;
   nodes_in_subnet : opt nat32;
 };
-service : (RouteArg) -> {
+service : {
+  add_aptos_port : (AptosPort) -> ();
   add_token : (Token) -> (opt Token);
-  aptos_port_info : () -> (AptosPortAction) query;
+  aptos_ports : () -> (vec AptosPort) query;
   aptos_route_address : (SnorKeyType) -> (Result);
   aptos_token : (text) -> (opt AptosToken) query;
   forward : () -> (opt text) query;
   get_account : (text, opt nat64) -> (Result);
   get_account_balance : (text, opt text) -> (Result_1);
   get_chain_list : () -> (vec Chain) query;
+  get_fa_obj_from_port : (text, text) -> (Result_2);
   get_fee_account : () -> (text) query;
   get_gas_budget : () -> (nat64);
   get_redeem_fee : (text) -> (opt nat) query;
@@ -139,10 +175,11 @@ service : (RouteArg) -> {
   get_token_list : () -> (vec TokenResp) query;
   get_transaction_by_hash : (text) -> (Result);
   rpc_provider : () -> (Provider) query;
-  transfer_aptos_from_route : (text, nat64, SnorKeyType) -> (Result);
-  update_aptos_port_info : (AptosPortAction) -> ();
-  update_aptos_token : (text, AptosToken) -> (Result_2);
+  submit_tx : (TxReq) -> (Result);
+  transfer_aptos : (text, nat64, SnorKeyType) -> (Result);
+  update_aptos_token : (text, AptosToken) -> (Result_3);
   update_gas_budget : (nat64) -> ();
+  update_port_package : (text) -> ();
   update_rpc_provider : (Provider) -> ();
-  verfy_txn : (text, nat64, SnorKeyType) -> (Result_3);
+  update_tx_option : (TxOptions) -> ();
 }

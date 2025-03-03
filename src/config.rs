@@ -1,5 +1,5 @@
 #![allow(unused)]
-use crate::aptos_client::LocalAccount;
+use crate::aptos_client::{AptosResult, LocalAccount, TxOptions};
 use crate::constants::{DEFAULT_GAS_BUDGET, FEE_TOKEN, NODES_IN_FIDUCIARY_SUBNET};
 
 use crate::aptos_client::aptos_providers::Provider;
@@ -10,6 +10,7 @@ use crate::ic_log::{DEBUG, ERROR};
 use crate::memory::Memory;
 use crate::types::{ChainId, ChainState, Factor};
 use crate::{auth::Permission, constants::SCHNORR_KEY_NAME, guard::TaskType, lifecycle::InitArgs};
+use aptos_api_types::transaction::{Event, Transaction};
 use candid::{CandidType, Principal};
 
 use ic_canister_log::log;
@@ -69,55 +70,62 @@ impl MultiRpcConfig {
         Ok(())
     }
 
-    // pub fn valid_and_get_result(
-    //     &self,
-    //     responses: &Vec<RpcResult<Vec<SuiEvent>>>,
-    // ) -> Result<Vec<SuiEvent>, String> {
-    //     self.check_config_valid()?;
-    //     let mut events_list = vec![];
-    //     // let mut success_response_body_list = vec![];
+    pub fn valid_and_get_result(
+        &self,
+        responses: &Vec<AptosResult<Transaction>>,
+    ) -> Result<Vec<Event>, String> {
+        self.check_config_valid()?;
+        let mut events_list = vec![];
+        // let mut success_response_body_list = vec![];
 
-    //     for response in responses {
-    //         log!(
-    //             DEBUG,
-    //             "[state::valid_and_get_result] input response: {:?}",
-    //             response
-    //         );
-    //         match response {
-    //             Ok(events) => events_list.push(events),
-    //             Err(e) => {
-    //                 log!(
-    //                     ERROR,
-    //                     "[state::valid_and_get_result] response error: {:?}",
-    //                     e.to_string()
-    //                 );
-    //                 continue;
-    //             }
-    //         }
-    //     }
+        for response in responses {
+            log!(
+                DEBUG,
+                "[state::valid_and_get_result] input response: {:?}",
+                response
+            );
+            match response {
+                Ok(tx) => match tx {
+                    Transaction::PendingTransaction(pending_tx) => {
+                        continue;
+                    }
+                    Transaction::UserTransaction(user_tx) => {
+                        events_list.push(user_tx.events.to_owned())
+                    }
+                },
+                Err(e) => {
+                    log!(
+                        ERROR,
+                        "[state::valid_and_get_result] response error: {:?}",
+                        e.to_string()
+                    );
+                    continue;
+                }
+            }
+        }
 
-    //     if events_list.len() < self.minimum_response_count as usize {
-    //         return Err(format!(
-    //             "Not enough valid response, expected: {}, actual: {}",
-    //             self.minimum_response_count,
-    //             events_list.len()
-    //         ));
-    //     }
+        if events_list.len() < self.minimum_response_count as usize {
+            return Err(format!(
+                "Not enough valid response, expected: {}, actual: {}",
+                self.minimum_response_count,
+                events_list.len()
+            ));
+        }
 
-    //     // The minimum_response_count should greater than 0
-    //     let mut i = 1;
-    //     while i < events_list.len() {
-    //         if events_list[i - 1] != events_list[i] {
-    //             return Err("Response mismatch".to_string());
-    //         }
-    //         i += 1;
-    //     }
+        // The minimum_response_count should greater than 0
+        let mut i = 1;
+        while i < events_list.len() {
+            if events_list[i - 1] != events_list[i] {
+                return Err("Response mismatch".to_string());
+            }
+            i += 1;
+        }
 
-    //     Ok(events_list[0].to_owned())
-    // }
+        Ok(events_list[0].to_owned())
+    }
 }
 
-pub const KEY_TYPE_NAME: &str = "Native";
+pub const NATIVE_KEY_TYPE: &str = "Native";
 #[derive(CandidType, Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
 pub enum SnorKeyType {
     ChainKey,
@@ -132,30 +140,6 @@ impl From<KeyType> for SnorKeyType {
         }
     }
 }
-
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct AptosPortAction {
-    pub package: String,
-    pub module: String,
-    pub functions: HashSet<String>,
-    pub port_owner_cap: String,
-    pub ticket_table: String,
-    pub upgrade_cap: String,
-}
-
-impl Storable for AptosPortAction {
-    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
-        let bytes = bincode::serialize(&self).expect("failed to serialize SuiPortAction");
-        Cow::Owned(bytes)
-    }
-
-    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
-        bincode::deserialize(bytes.as_ref()).expect("failed to deserialize SuiPortAction")
-    }
-
-    const BOUND: Bound = Bound::Unbounded;
-}
-
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct RouteConfig {
     pub chain_id: String,
@@ -177,7 +161,8 @@ pub struct RouteConfig {
     pub forward: Option<String>,
     pub enable_debug: bool,
     pub key_type: KeyType,
-    pub sui_port_action: AptosPortAction,
+    pub current_port_package: Option<String>,
+    pub tx_opt: TxOptions,
     // pub local_account: LocalAccount,
     // pub sui_route_address: HashMap<KeyType, Vec<u8>>,
 }
@@ -202,16 +187,14 @@ impl Default for RouteConfig {
             forward: None,
             enable_debug: false,
             key_type: KeyType::ChainKey,
-            sui_port_action: AptosPortAction::default(),
-            // sui_route_address: HashMap::default(),
+            current_port_package: None,
+            tx_opt: TxOptions::default(),
         }
     }
 }
 
 impl From<InitArgs> for RouteConfig {
     fn from(args: InitArgs) -> Self {
-        //TODO: init local account for aptos
-
         Self {
             chain_id: args.chain_id,
             hub_principal: args.hub_principal,
@@ -233,8 +216,8 @@ impl From<InitArgs> for RouteConfig {
             forward: None,
             enable_debug: false,
             key_type: KeyType::ChainKey,
-            sui_port_action: AptosPortAction::default(),
-            // sui_route_address: HashMap::default(),
+            current_port_package: None,
+            tx_opt: TxOptions::default(),
         }
     }
 }
