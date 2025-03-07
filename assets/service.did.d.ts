@@ -58,6 +58,7 @@ export interface InitArgs {
 export type KeyType = { 'Native' : Uint8Array | number[] } |
   { 'ChainKey' : null };
 export interface MintTokenReq {
+  'token_id' : string,
   'recipient' : string,
   'ticket_id' : string,
   'mint_acmount' : bigint,
@@ -74,6 +75,13 @@ export type Provider = { 'Mainnet' : null } |
   { 'Testnet' : null } |
   { 'Devnet' : null } |
   { 'Localnet' : null };
+export type ReqType = { 'CreateToken' : CreateTokenReq } |
+  { 'CollectFee' : bigint } |
+  { 'RemoveTicket' : string } |
+  { 'TransferApt' : TransferReq } |
+  { 'BurnToken' : BurnTokenReq } |
+  { 'MintToken' : MintTokenReq } |
+  { 'UpdateMeta' : UpdateMetaReq };
 export type Result = { 'Ok' : string } |
   { 'Err' : string };
 export type Result_1 = { 'Ok' : bigint } |
@@ -132,24 +140,20 @@ export interface TokenResp {
   'rune_id' : [] | [string],
   'symbol' : string,
 }
+export interface TransferReq { 'recipient' : string, 'amount' : bigint }
 export interface TxOptions {
   'max_gas_amount' : bigint,
   'chain_id' : number,
   'gas_unit_price' : bigint,
   'timeout_secs' : bigint,
 }
-export type TxReq = { 'CreateToken' : CreateTokenReq } |
-  { 'CollectFee' : bigint } |
-  { 'RemoveTicket' : string } |
-  { 'BurnToken' : BurnTokenReq } |
-  { 'MintToken' : MintTokenReq } |
-  { 'UpdateMeta' : UpdateMetaReq };
 export type TxStatus = { 'New' : null } |
   { 'Finalized' : null } |
   { 'TxFailed' : { 'e' : string } } |
   { 'Pending' : null };
 export interface UpdateMetaReq {
   'decimals' : [] | [number],
+  'token_id' : string,
   'project_uri' : [] | [string],
   'name' : [] | [string],
   'icon_uri' : [] | [string],
@@ -186,8 +190,7 @@ export interface _SERVICE {
   'get_token_list' : ActorMethod<[], Array<TokenResp>>,
   'get_transaction_by_hash' : ActorMethod<[string], Result>,
   'rpc_provider' : ActorMethod<[], Provider>,
-  'submit_tx' : ActorMethod<[TxReq], Result>,
-  'transfer_aptos' : ActorMethod<[string, bigint, SnorKeyType], Result>,
+  'submit_tx' : ActorMethod<[ReqType], Result>,
   'update_aptos_token' : ActorMethod<[string, AptosToken], Result_3>,
   'update_gas_budget' : ActorMethod<[bigint], undefined>,
   'update_port_package' : ActorMethod<[string], undefined>,

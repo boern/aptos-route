@@ -51,6 +51,7 @@ type InitArgs = record {
 };
 type KeyType = variant { Native : blob; ChainKey };
 type MintTokenReq = record {
+  token_id : text;
   recipient : text;
   ticket_id : text;
   mint_acmount : nat64;
@@ -67,6 +68,15 @@ type Provider = variant {
   Testnet;
   Devnet;
   Localnet;
+};
+type ReqType = variant {
+  CreateToken : CreateTokenReq;
+  CollectFee : nat64;
+  RemoveTicket : text;
+  TransferApt : TransferReq;
+  BurnToken : BurnTokenReq;
+  MintToken : MintTokenReq;
+  UpdateMeta : UpdateMetaReq;
 };
 type Result = variant { Ok : text; Err : text };
 type Result_1 = variant { Ok : nat64; Err : text };
@@ -117,19 +127,12 @@ type TokenResp = record {
   rune_id : opt text;
   symbol : text;
 };
+type TransferReq = record { recipient : text; amount : nat64 };
 type TxOptions = record {
   max_gas_amount : nat64;
   chain_id : nat8;
   gas_unit_price : nat64;
   timeout_secs : nat64;
-};
-type TxReq = variant {
-  CreateToken : CreateTokenReq;
-  CollectFee : nat64;
-  RemoveTicket : text;
-  BurnToken : BurnTokenReq;
-  MintToken : MintTokenReq;
-  UpdateMeta : UpdateMetaReq;
 };
 type TxStatus = variant {
   New;
@@ -139,6 +142,7 @@ type TxStatus = variant {
 };
 type UpdateMetaReq = record {
   decimals : opt nat8;
+  token_id : text;
   project_uri : opt text;
   name : opt text;
   icon_uri : opt text;
@@ -175,8 +179,7 @@ service : {
   get_token_list : () -> (vec TokenResp) query;
   get_transaction_by_hash : (text) -> (Result);
   rpc_provider : () -> (Provider) query;
-  submit_tx : (TxReq) -> (Result);
-  transfer_aptos : (text, nat64, SnorKeyType) -> (Result);
+  submit_tx : (ReqType) -> (Result);
   update_aptos_token : (text, AptosToken) -> (Result_3);
   update_gas_budget : (nat64) -> ();
   update_port_package : (text) -> ();

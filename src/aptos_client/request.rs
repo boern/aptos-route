@@ -1,6 +1,6 @@
 use aptos_types::transaction::SignedTransaction;
 use ic_cdk::api::management_canister::http_request::{HttpHeader, HttpMethod};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::fmt;
 
 use crate::ck_eddsa::hash_with_sha256;

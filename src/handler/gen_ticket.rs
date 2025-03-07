@@ -185,7 +185,7 @@ pub async fn verify_tx(req: GenerateTicketReq) -> Result<bool, GenerateTicketErr
     multi_rpc_config
         .check_config_valid()
         .map_err(|e| GenerateTicketError::TemporarilyUnavailable(e.to_string()))?;
-    let client = RestClient::new();
+    let client = RestClient::client();
     let events = query_tx_from_multi_rpc(
         &client,
         req.tx_hash.to_owned(),

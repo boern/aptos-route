@@ -49,6 +49,7 @@ pub async fn query_directives() {
                                         read_state(|s| s.atptos_tokens.get(&update_token.token_id))
                                             .expect("aptos token is None");
                                     let req = UpdateMetaReq {
+                                        token_id: update_token.token_id.to_owned(),
                                         fa_obj: aptos_token.fa_obj_id.expect("fa obj id is None"),
                                         name: Some(update_token.name.to_owned()),
                                         symbol: Some(update_token.symbol.to_owned()),

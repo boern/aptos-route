@@ -149,12 +149,17 @@ export const idlFactory = ({ IDL }) => {
     'max_supply' : IDL.Opt(IDL.Nat),
     'symbol' : IDL.Text,
   });
+  const TransferReq = IDL.Record({
+    'recipient' : IDL.Text,
+    'amount' : IDL.Nat64,
+  });
   const BurnTokenReq = IDL.Record({
     'memo' : IDL.Opt(IDL.Text),
     'fa_obj' : IDL.Text,
     'burn_acmount' : IDL.Nat64,
   });
   const MintTokenReq = IDL.Record({
+    'token_id' : IDL.Text,
     'recipient' : IDL.Text,
     'ticket_id' : IDL.Text,
     'mint_acmount' : IDL.Nat64,
@@ -162,16 +167,18 @@ export const idlFactory = ({ IDL }) => {
   });
   const UpdateMetaReq = IDL.Record({
     'decimals' : IDL.Opt(IDL.Nat8),
+    'token_id' : IDL.Text,
     'project_uri' : IDL.Opt(IDL.Text),
     'name' : IDL.Opt(IDL.Text),
     'icon_uri' : IDL.Opt(IDL.Text),
     'fa_obj' : IDL.Text,
     'symbol' : IDL.Opt(IDL.Text),
   });
-  const TxReq = IDL.Variant({
+  const ReqType = IDL.Variant({
     'CreateToken' : CreateTokenReq,
     'CollectFee' : IDL.Nat64,
     'RemoveTicket' : IDL.Text,
+    'TransferApt' : TransferReq,
     'BurnToken' : BurnTokenReq,
     'MintToken' : MintTokenReq,
     'UpdateMeta' : UpdateMetaReq,
@@ -200,12 +207,7 @@ export const idlFactory = ({ IDL }) => {
     'get_token_list' : IDL.Func([], [IDL.Vec(TokenResp)], ['query']),
     'get_transaction_by_hash' : IDL.Func([IDL.Text], [Result], []),
     'rpc_provider' : IDL.Func([], [Provider], ['query']),
-    'submit_tx' : IDL.Func([TxReq], [Result], []),
-    'transfer_aptos' : IDL.Func(
-        [IDL.Text, IDL.Nat64, SnorKeyType],
-        [Result],
-        [],
-      ),
+    'submit_tx' : IDL.Func([ReqType], [Result], []),
     'update_aptos_token' : IDL.Func([IDL.Text, AptosToken], [Result_3], []),
     'update_gas_budget' : IDL.Func([IDL.Nat64], [], []),
     'update_port_package' : IDL.Func([IDL.Text], [], []),

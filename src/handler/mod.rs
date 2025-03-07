@@ -7,3 +7,4 @@ pub mod gen_ticket;
 pub mod mint_token;
 pub mod scheduler;
 pub mod update_token;
+pub mod handle_tx;

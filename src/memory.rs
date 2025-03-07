@@ -6,6 +6,8 @@ use ic_stable_structures::{
 };
 use std::cell::RefCell;
 
+use crate::aptos_client::TxReq;
+use crate::aptos_client::TxStatus;
 use crate::ck_eddsa::KeyType;
 use crate::config::RouteConfig;
 
@@ -29,6 +31,7 @@ const MINT_TOKEN_REQUESTS: MemoryId = MemoryId::new(9);
 const GEN_TICKET_REQS: MemoryId = MemoryId::new(10);
 const SEEDS: MemoryId = MemoryId::new(11);
 const ROUTE_ADDRESSES: MemoryId = MemoryId::new(12);
+const TX_QUEUE: MemoryId = MemoryId::new(13);
 
 type InnerMemory = DefaultMemoryImpl;
 
@@ -101,6 +104,10 @@ pub fn get_aptos_ports_memory() -> Memory {
     with_memory_manager(|m| m.get(APTOS_PORTS))
 }
 
+pub fn get_tx_queue_memory() -> Memory {
+    with_memory_manager(|m| m.get(TX_QUEUE))
+}
+
 pub fn init_ticket_queue() -> StableBTreeMap<u64, Ticket, Memory> {
     StableBTreeMap::init(get_ticket_queue_memory())
 }
@@ -148,4 +155,8 @@ pub fn init_route_addresses() -> StableBTreeMap<KeyType, Vec<u8>, Memory> {
 
 pub fn init_aptos_ports() -> StableBTreeMap<String, AptosPort, Memory> {
     StableBTreeMap::init(get_aptos_ports_memory())
+}
+
+pub fn init_tx_queue() -> StableBTreeMap<TxReq, TxStatus, Memory> {
+    StableBTreeMap::init(get_tx_queue_memory())
 }

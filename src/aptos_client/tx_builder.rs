@@ -1,16 +1,15 @@
-
 use std::str::FromStr;
-
 
 use aptos_global_constants::{GAS_UNIT_PRICE, MAX_GAS_AMOUNT};
 
 use ic_canister_log::log;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     config::read_config,
     constants::{
-        BURN_TOKEN_FUNC, COLLECT_FEE_FUNC, CREATE_FUNGIBLE_ASSET, 
-        MINT_WITH_TICKET_FUNC, REMOVE_TICKET_FUNC, UPDATE_META_FUNC,
+        BURN_TOKEN_FUNC, COLLECT_FEE_FUNC, CREATE_FUNGIBLE_ASSET, MINT_WITH_TICKET_FUNC,
+        REMOVE_TICKET_FUNC, TRANSFER_COINS, UPDATE_META_FUNC,
     },
     ic_log::DEBUG,
     state::read_state,
@@ -27,10 +26,12 @@ use aptos_types::{
 };
 use ic_cdk::api;
 use move_core_types::{
-    account_address::AccountAddress, identifier::Identifier, language_storage::ModuleId,
+    account_address::AccountAddress,
+    identifier::Identifier,
+    language_storage::{ModuleId, TypeTag},
 };
 
-use super::{ LocalAccount, TxOptions, TxReq};
+use super::{LocalAccount, ReqType, TxOptions};
 
 pub struct TransactionBuilder {
     sender: Option<AccountAddress>,
@@ -204,94 +205,19 @@ impl TransactionFactory {
 
 pub async fn get_signed_tx(
     from_account: &mut LocalAccount,
-    req: TxReq,
+    req: &ReqType,
     options: Option<TxOptions>,
 ) -> Result<SignedTransaction> {
-    let (func_id, type_args, args) = match req {
-        TxReq::CreateToken(req) => {
-            let func_id = Identifier::new(CREATE_FUNGIBLE_ASSET)?;
-            let type_args = vec![];
-            let args = vec![
-                bcs::to_bytes(&req.token_id)?,
-                bcs::to_bytes(&req.name)?,
-                bcs::to_bytes(&req.symbol)?,
-                bcs::to_bytes(&req.decimals)?,
-                bcs::to_bytes(&req.icon_uri)?,
-                bcs::to_bytes(&req.max_supply)?,
-                bcs::to_bytes(&req.project_uri)?,
-            ];
-            (func_id, type_args, args)
-        }
-        TxReq::UpdateMeta(req) => {
-            let func_id = Identifier::new(UPDATE_META_FUNC)?;
-            let type_args = vec![];
-            let fa_obj = AccountAddress::from_str(&req.fa_obj)?;
-            let args = vec![
-                bcs::to_bytes(&fa_obj)?,
-                bcs::to_bytes(&req.name)?,
-                bcs::to_bytes(&req.symbol)?,
-                bcs::to_bytes(&req.decimals)?,
-                bcs::to_bytes(&req.icon_uri)?,
-                bcs::to_bytes(&req.project_uri)?,
-            ];
-            (func_id, type_args, args)
-        }
-        TxReq::MintToken(req) => {
-            let func_id = Identifier::new(MINT_WITH_TICKET_FUNC)?;
-            let type_args = vec![];
-            let fa_obj = AccountAddress::from_str(&req.fa_obj)?;
-            let recipient = AccountAddress::from_str(&req.recipient)?;
-            let args = vec![
-                bcs::to_bytes(&req.ticket_id)?,
-                bcs::to_bytes(&fa_obj)?,
-                bcs::to_bytes(&recipient)?,
-                bcs::to_bytes(&req.mint_acmount)?,
-            ];
-            (func_id, type_args, args)
-        }
-        TxReq::BurnToken(req) => {
-            let func_id = Identifier::new(BURN_TOKEN_FUNC)?;
-            let type_args = vec![];
-            let fa_obj = AccountAddress::from_str(&req.fa_obj)?;
-            let args = vec![
-                bcs::to_bytes(&fa_obj)?,
-                bcs::to_bytes(&req.burn_acmount)?,
-                bcs::to_bytes(&req.memo)?,
-            ];
-            (func_id, type_args, args)
-        }
-        TxReq::CollectFee(fee_amount) => {
-            let func_id = Identifier::new(COLLECT_FEE_FUNC)?;
-            let type_args = vec![];
-            let args = vec![bcs::to_bytes(&fee_amount)?];
-            (func_id, type_args, args)
-        }
-        TxReq::RemoveTicket(ticket_id) => {
-            let func_id = Identifier::new(REMOVE_TICKET_FUNC)?;
-            let type_args = vec![];
-            let args = vec![bcs::to_bytes(&ticket_id)?];
-            (func_id, type_args, args)
-        }
-    };
+    let contact_func = get_contract_func(req).await?;
     log!(
         DEBUG,
-        "[tx_builder::get_signed_tx] func_id: {:?}, type_args:{:?}, args:{:?} ",
-        func_id,
-        type_args,
-        args
+        "[tx_builder::get_signed_tx] contact_func: {:?} ",
+        contact_func
     );
 
     let options = options.unwrap_or_default();
-    let current_package =
-        read_config(|c| c.get().current_port_package.to_owned()).expect("port package is none!");
-    let port_address = AccountAddress::from_str(&current_package)?;
-    let port_info =
-        read_state(|s| s.aptos_ports.get(&current_package)).expect("port info is none!");
-    let module_id = Identifier::new(port_info.module)?;
-
     // get current timestamp and conver to second
     let now_s = api::time() / 1_000_000_000;
-
     let seq_num = from_account.update_seq_from_chain().await?;
     log!(
         DEBUG,
@@ -300,10 +226,10 @@ pub async fn get_signed_tx(
     );
     let transaction_builder = TransactionBuilder::new(
         TransactionPayload::EntryFunction(EntryFunction::new(
-            ModuleId::new(port_address, module_id),
-            func_id,
-            type_args,
-            args,
+            ModuleId::new(contact_func.package, contact_func.module),
+            contact_func.func,
+            contact_func.type_args,
+            contact_func.args,
         )),
         now_s + options.timeout_secs,
         ChainId::new(options.chain_id),
@@ -316,4 +242,149 @@ pub async fn get_signed_tx(
         .sign_with_transaction_builder(transaction_builder)
         .await;
     Ok(signed_txn)
+}
+
+pub async fn get_contract_func(req: &ReqType) -> Result<ContractFunc> {
+    let current_package =
+        read_config(|c| c.get().current_port_package.to_owned()).expect("port package is none!");
+    let port_address = AccountAddress::from_str(&current_package)?;
+    let port_info =
+        read_state(|s| s.aptos_ports.get(&current_package)).expect("port info is none!");
+
+    match req {
+        ReqType::CreateToken(req) => {
+            let module_id = Identifier::new(port_info.module)?;
+            let func_id = Identifier::new(CREATE_FUNGIBLE_ASSET)?;
+            let type_args = vec![];
+            let args = vec![
+                bcs::to_bytes(&req.token_id)?,
+                bcs::to_bytes(&req.name)?,
+                bcs::to_bytes(&req.symbol)?,
+                bcs::to_bytes(&req.decimals)?,
+                bcs::to_bytes(&req.icon_uri)?,
+                bcs::to_bytes(&req.max_supply)?,
+                bcs::to_bytes(&req.project_uri)?,
+            ];
+
+            Ok(ContractFunc {
+                package: port_address,
+                module: module_id,
+                func: func_id,
+                type_args,
+                args,
+            })
+        }
+        ReqType::UpdateMeta(req) => {
+            let module_id = Identifier::new(port_info.module)?;
+            let func_id = Identifier::new(UPDATE_META_FUNC)?;
+            let type_args = vec![];
+            let fa_obj = AccountAddress::from_str(&req.fa_obj)?;
+            let args = vec![
+                bcs::to_bytes(&fa_obj)?,
+                bcs::to_bytes(&req.name)?,
+                bcs::to_bytes(&req.symbol)?,
+                bcs::to_bytes(&req.decimals)?,
+                bcs::to_bytes(&req.icon_uri)?,
+                bcs::to_bytes(&req.project_uri)?,
+            ];
+
+            Ok(ContractFunc {
+                package: port_address,
+                module: module_id,
+                func: func_id,
+                type_args,
+                args,
+            })
+        }
+        ReqType::MintToken(req) => {
+            let module_id = Identifier::new(port_info.module)?;
+            let func_id = Identifier::new(MINT_WITH_TICKET_FUNC)?;
+            let type_args = vec![];
+            let fa_obj = AccountAddress::from_str(&req.fa_obj)?;
+            let recipient = AccountAddress::from_str(&req.recipient)?;
+            let args = vec![
+                bcs::to_bytes(&req.ticket_id)?,
+                bcs::to_bytes(&fa_obj)?,
+                bcs::to_bytes(&recipient)?,
+                bcs::to_bytes(&req.mint_acmount)?,
+            ];
+
+            Ok(ContractFunc {
+                package: port_address,
+                module: module_id,
+                func: func_id,
+                type_args,
+                args,
+            })
+        }
+        ReqType::BurnToken(req) => {
+            let module_id = Identifier::new(port_info.module)?;
+            let func_id = Identifier::new(BURN_TOKEN_FUNC)?;
+            let type_args = vec![];
+            let fa_obj = AccountAddress::from_str(&req.fa_obj)?;
+            let args = vec![
+                bcs::to_bytes(&fa_obj)?,
+                bcs::to_bytes(&req.burn_acmount)?,
+                bcs::to_bytes(&req.memo)?,
+            ];
+            Ok(ContractFunc {
+                package: port_address,
+                module: module_id,
+                func: func_id,
+                type_args,
+                args,
+            })
+        }
+        ReqType::CollectFee(fee_amount) => {
+            let module_id = Identifier::new(port_info.module)?;
+            let func_id = Identifier::new(COLLECT_FEE_FUNC)?;
+            let type_args = vec![];
+            let args = vec![bcs::to_bytes(&fee_amount)?];
+            Ok(ContractFunc {
+                package: port_address,
+                module: module_id,
+                func: func_id,
+                type_args,
+                args,
+            })
+        }
+        ReqType::RemoveTicket(ticket_id) => {
+            let module_id = Identifier::new(port_info.module)?;
+            let func_id = Identifier::new(REMOVE_TICKET_FUNC)?;
+            let type_args = vec![];
+            let args = vec![bcs::to_bytes(&ticket_id)?];
+            Ok(ContractFunc {
+                package: port_address,
+                module: module_id,
+                func: func_id,
+                type_args,
+                args,
+            })
+        }
+        ReqType::TransferApt(req) => {
+            let package = AccountAddress::ONE;
+            let module = Identifier::new("aptos_account")?;
+            let func = Identifier::new(TRANSFER_COINS)?;
+            let coin_type = TypeTag::from_str("0x1::aptos_coin::AptosCoin")?;
+            let type_args = vec![coin_type];
+            let recipient = AccountAddress::from_str(&req.recipient)?;
+            let args = vec![bcs::to_bytes(&recipient)?, bcs::to_bytes(&req.amount)?];
+            Ok(ContractFunc {
+                package,
+                module,
+                func,
+                type_args,
+                args,
+            })
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContractFunc {
+    pub package: AccountAddress,
+    pub module: Identifier,
+    pub func: Identifier,
+    pub type_args: Vec<TypeTag>,
+    pub args: Vec<Vec<u8>>,
 }

@@ -1,8 +1,8 @@
 
 use crate::aptos_client::rest_client::RestClient;
-use crate::aptos_client::{tx_builder, LocalAccount, MintTokenReq, TxReq};
-use crate::types::{ Error,TicketId};
-use candid::{ CandidType, Principal};
+use crate::aptos_client::{tx_builder, LocalAccount, MintTokenReq, ReqType,TxStatus};
+use crate::types::TicketId;
+use candid::CandidType;
 
 use ic_stable_structures::Storable;
 use ic_stable_structures::storable::Bound;
@@ -11,7 +11,7 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::TxStatus;
+
 use crate::{
     call_error::{CallError, Reason},
     state::{mutate_state, read_state},
@@ -137,25 +137,25 @@ pub async fn mint_token() {
                    
                 });
                 // update tx hash to hub
-                let hub_principal = read_config(|s| s.get().hub_principal);
-                let digest = mint_req.tx_hash.unwrap();
+                // let hub_principal = read_config(|s| s.get().hub_principal);
+                // let digest = mint_req.tx_hash.unwrap();
                        
-                match update_tx_to_hub(hub_principal, ticket.ticket_id.to_string(), digest.to_owned()).await {
-                   Ok(()) =>{
-                       log!(
-                           DEBUG,
-                           "[mint_token::mint_token] mint req tx({:?}) already finallized and update tx digest to hub! ",
-                           digest
-                       );
-                   }
-                   Err(err) =>  {
-                       log!(
-                        ERROR,
-                           "[mint_token::mint_token] failed to update tx hash to hub:{}",
-                           err
-                       );
-                   }
-               }   
+            //     match update_tx_to_hub(hub_principal, ticket.ticket_id.to_string(), digest.to_owned()).await {
+            //        Ok(()) =>{
+            //            log!(
+            //                DEBUG,
+            //                "[mint_token::mint_token] mint req tx({:?}) already finallized and update tx digest to hub! ",
+            //                digest
+            //            );
+            //        }
+            //        Err(err) =>  {
+            //            log!(
+            //             ERROR,
+            //                "[mint_token::mint_token] failed to update tx hash to hub:{}",
+            //                err
+            //            );
+            //        }
+            //    }   
                                       
            }
             TxStatus::TxFailed { e } => {
@@ -181,21 +181,22 @@ pub async fn inner_mint_token(mint_req:&MintTokenRequest) {
     let fa_obj_id = read_state(|s|s.atptos_tokens.get(&mint_req.token_id)).expect("aptos token is None").fa_obj_id.expect("fa obj id is None");
     let req = MintTokenReq {
          ticket_id: mint_req.ticket_id.to_owned(),
+         token_id:mint_req.token_id.to_owned(),
         fa_obj: fa_obj_id,
         recipient: mint_req.recipient.to_owned(),
         mint_acmount: mint_req.amount,
     };
     match  LocalAccount::local_account().await{
         Ok(mut local_account) => {
-            let tx_req = TxReq::MintToken(req);
-            if let Ok(signed_txn) = tx_builder::get_signed_tx(&mut local_account, tx_req, None)
+            let tx_req = ReqType::MintToken(req);
+            if let Ok(signed_txn) = tx_builder::get_signed_tx(&mut local_account, &tx_req, None)
                 .await {
                     log!(
                         DEBUG,
                         "[mint_token::inner_mint_token] SignedTransaction: {:#?} ",
                         signed_txn
                     );
-                    let client = RestClient::new();
+                    let client = RestClient::client();
                     match client.summit_tx(&signed_txn, &client.forward).await {
                         Ok(tx) => {
                             log!(
@@ -253,7 +254,7 @@ pub async fn inner_mint_token(mint_req:&MintTokenRequest) {
 
 pub async fn update_tx_status(tx_hash: String, ticket_id: String) {
     // query signature status
-    let client = RestClient::new();
+    let client = RestClient::client();
     let tx = client.get_transaction_by_hash(tx_hash.to_owned(), &client.forward).await;
     match tx {
         Err(e) => {
@@ -308,25 +309,28 @@ pub async fn update_tx_status(tx_hash: String, ticket_id: String) {
     }
 }
 
-
-
-pub async fn update_tx_to_hub(
-    hub_principal: Principal,
-    ticket_id: TicketId,
-    mint_tx_hash: String,
-) -> Result<(), CallError> {
-    let resp: (Result<(), Error>,) =
-        ic_cdk::api::call::call(hub_principal, "update_tx_hash", (ticket_id, mint_tx_hash))
+pub async fn update_tx_to_hub(ticket_id: &String,tx_hash: &String,) {
+    let hub_principal = read_config(|s| s.get().hub_principal);
+    let tx_hash = tx_hash.to_owned();
+    match  ic_cdk::api::call::call(hub_principal, "update_tx_hash", (ticket_id.to_owned(), tx_hash.to_owned()))
             .await
             .map_err(|(code, message)| CallError {
                 method: "update_tx_hash".to_string(),
                 reason: Reason::from_reject(code, message),
-            })?;
-    resp.0.map_err(|err| CallError {
-        method: "update_tx_hash".to_string(),
-        reason: Reason::CanisterError(err.to_string()),
-    })?;
-    Ok(())
+            }) {
+                Ok(()) => {
+                log!(DEBUG,
+                        "[mint_token::mint_token] mint req tx({:?}) already finallized and update tx digest to hub! ",
+                        tx_hash
+                    );
+                } 
+                Err(err) => {
+                    log!(ERROR,
+                        "[mint_token::mint_token] failed to update tx hash to hub:{}",err);
+                    //TODO: save the req into failed queue;
+                }
+            }
+  
 }
 
 #[cfg(test)]

@@ -201,48 +201,9 @@ pub fn hash_with_sha256(input: &Vec<u8>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*;
     // use crate::types::Pubkey;
 
     #[test]
-    fn test_sign_and_verify_native_schnorr_ed25519() {
-        // use ed25519_dalek::{Signature, Verifier, VerifyingKey};
-
-        // // Setup for signing
-        // let test_seed = [1u8; 64];
-        // // Example derivation path for signing
-        // let derivation_path = [vec![1u8; 4]]
-        //     .iter()
-        //     .map(|v| ByteBuf::from(v.clone()))
-        //     .collect();
-        // let derivation_path = derivation_path_ed25519(&Principal::anonymous(), &derivation_path);
-
-        // let message = b"Test message";
-
-        // // Call the sign function
-        // let sign_reply = sign_with_native_ed25519(
-        //     &Seed::new(test_seed),
-        //     derivation_path.clone(),
-        //     ByteBuf::from(message.to_vec()),
-        // );
-
-        // // Setup for verification
-        // let signature = Signature::from_slice(&sign_reply).expect("Invalid signature format");
-        // println!("signature: {:?}", signature);
-        // let public_key_reply = native_public_key_ed25519(Seed::new(test_seed), derivation_path);
-        // // let pk = Pubkey::try_from(public_key_reply.to_owned().as_slice())
-        // //     .map_err(|e| e.to_string())
-        // //     .unwrap();
-        // // println!("public_key: {:?}", pk.to_string());
-
-        // let raw_public_key = public_key_reply.as_slice();
-        // assert_eq!(raw_public_key.len(), 32);
-        // let mut public_key = [0u8; 32];
-        // public_key.copy_from_slice(raw_public_key);
-
-        // let public_key = VerifyingKey::from_bytes(&public_key).unwrap();
-
-        // // Verify the signature
-        // assert!(public_key.verify(message, &signature).is_ok());
-    }
+    fn test_sign_and_verify_native_schnorr_ed25519() {}
 }

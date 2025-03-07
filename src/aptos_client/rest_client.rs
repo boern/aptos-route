@@ -105,7 +105,7 @@ pub struct RestClient {
 }
 
 impl RestClient {
-    pub fn new() -> Self {
+    pub fn client() -> Self {
         let (provider, nodes_in_subnet, forward) = read_config(|s| {
             (
                 s.get().rpc_provider.to_owned(),

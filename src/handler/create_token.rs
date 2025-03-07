@@ -1,6 +1,6 @@
 
 use crate::aptos_client::rest_client::RestClient;
-use crate::aptos_client::{tx_builder, CreateTokenReq, LocalAccount, TxReq};
+use crate::aptos_client::{tx_builder, CreateTokenReq, LocalAccount, ReqType, TxStatus};
 
 
 
@@ -8,7 +8,7 @@ use crate::config::read_config;
 use crate::constants::{GET_FA_OBJ, RETRY_NUM};
 
 use crate::ic_log::{DEBUG, ERROR, WARNING};
-use crate::state::{mutate_state, read_state, AptosToken, TxStatus};
+use crate::state::{mutate_state, read_state, AptosToken};
 use ic_canister_log::log;
 
 pub async fn create_token() {
@@ -120,15 +120,15 @@ pub async fn inner_create_token(create_token_req:&CreateTokenReq) {
 
     match  LocalAccount::local_account().await{
         Ok(mut local_account) => {
-            let tx_req = TxReq::CreateToken(create_token_req.to_owned());
-            if let Ok(signed_txn) = tx_builder::get_signed_tx(&mut local_account, tx_req, None)
+            let tx_req = ReqType::CreateToken(create_token_req.to_owned());
+            if let Ok(signed_txn) = tx_builder::get_signed_tx(&mut local_account, &tx_req, None)
                 .await {
                     log!(
                         DEBUG,
                         "[create_token::inner_create_token] SignedTransaction: {:#?} ",
                         signed_txn
                     );
-                    let client = RestClient::new();
+                    let client = RestClient::client();
                     match client.summit_tx(&signed_txn, &client.forward).await {
                         Ok(tx) => {
                             log!(
@@ -189,7 +189,7 @@ pub async fn inner_create_token(create_token_req:&CreateTokenReq) {
 
 pub async fn update_token_status(tx_hash: String, token_id: String) {
     // query signature status
-    let client = RestClient::new();
+    let client = RestClient::client();
     let tx = client.get_transaction_by_hash(tx_hash.to_owned(), &client.forward).await;
     match tx {
         Err(e) => {
@@ -258,6 +258,42 @@ pub async fn update_token_status(tx_hash: String, token_id: String) {
                 
             }
           
+        }
+    }
+}
+
+
+pub async fn update_fa_obj(client: &RestClient,token_id: &String) {
+
+    // get fa obj id from port
+    let current_package =
+    read_config(|c| c.get().current_port_package.to_owned()).expect("port package is none!");
+
+     let port_info =
+    read_state(|s| s.aptos_ports.get(&current_package)).expect("port info is none!");
+
+    let view_func = format!("{}::{}::{}",current_package,port_info.module,GET_FA_OBJ);
+    match client.get_fa_obj(view_func, token_id.to_owned(), &client.forward).await {
+        Ok(fa_obj) => {
+            if let Some(fa_obj_id) = fa_obj.first() {
+                 // update account status to Finalized
+                mutate_state(|s| {
+                    if let Some(aptos_token) = s.atptos_tokens
+                    .get(token_id).as_mut() {
+                        aptos_token.fa_obj_id=Some(fa_obj_id.to_owned());
+                        s.atptos_tokens.insert(token_id.to_owned(),aptos_token.to_owned());
+                    }
+                });
+            }
+        }
+        Err(e) => {
+           log!(
+               ERROR,
+               "[create_token::update_tx_status] get_fa_obj error: {}",
+               e.to_string(),
+               
+           );
+           //TODO,retry get fa obj
         }
     }
 }

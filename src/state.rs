@@ -1,5 +1,5 @@
 #![allow(unused)]
-use crate::aptos_client::UpdateMetaReq;
+use crate::aptos_client::{TxReq, TxStatus, UpdateMetaReq};
 use crate::ck_eddsa::KeyType;
 use crate::config::{mutate_config, read_config, RouteConfig};
 
@@ -31,14 +31,6 @@ pub type AssociatedAccount = String;
 thread_local! {
 
     static STATE: RefCell<Option<RouteState>> = RefCell::default();
-}
-
-#[derive(CandidType, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TxStatus {
-    New,
-    Pending,
-    Finalized,
-    TxFailed { e: String },
 }
 
 #[derive(CandidType, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,12 +135,12 @@ pub struct AptosPort {
 
 impl Storable for AptosPort {
     fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
-        let bytes = bincode::serialize(&self).expect("failed to serialize SuiPortAction");
+        let bytes = bincode::serialize(&self).expect("failed to serialize AptosPort");
         Cow::Owned(bytes)
     }
 
     fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
-        bincode::deserialize(bytes.as_ref()).expect("failed to deserialize SuiPortAction")
+        bincode::deserialize(bytes.as_ref()).expect("failed to deserialize AptosPort")
     }
 
     const BOUND: Bound = Bound::Unbounded;
@@ -214,6 +206,9 @@ pub struct RouteState {
     pub aptos_ports: StableBTreeMap<String, AptosPort, Memory>,
     #[serde(skip, default = "crate::memory::init_aptos_tokens")]
     pub atptos_tokens: StableBTreeMap<TokenId, AptosToken, Memory>,
+
+    #[serde(skip, default = "crate::memory::init_tx_queue")]
+    pub tx_queue: StableBTreeMap<TxReq, TxStatus, Memory>,
 }
 
 impl RouteState {
@@ -233,6 +228,7 @@ impl RouteState {
             route_addresses: StableBTreeMap::init(crate::memory::get_route_addresses_memory()),
             aptos_ports: StableBTreeMap::init(crate::memory::get_aptos_ports_memory()),
             atptos_tokens: StableBTreeMap::init(crate::memory::get_aptos_tokens_memory()),
+            tx_queue: StableBTreeMap::init(crate::memory::get_tx_queue_memory()),
         }
     }
     pub fn add_chain(&mut self, chain: Chain) {

@@ -8,7 +8,6 @@ pub mod utils;
 pub use types::*;
 pub mod request;
 pub mod response;
-pub mod transfer;
 pub mod tx_builder;
 
 

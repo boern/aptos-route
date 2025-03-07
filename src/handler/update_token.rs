@@ -1,11 +1,11 @@
 
 use crate::aptos_client::rest_client::RestClient;
-use crate::aptos_client::{tx_builder, LocalAccount, TxReq};
+use crate::aptos_client::{tx_builder, LocalAccount, ReqType, TxStatus};
 
 use crate::constants::RETRY_NUM;
 use crate::ic_log::{DEBUG, ERROR, WARNING};
 
-use crate::state::{TxStatus, UpdateTokenStatus};
+use crate::state::UpdateTokenStatus;
 
 
 use crate::state::{mutate_state, read_state};
@@ -77,16 +77,16 @@ pub async fn update_token() {
 pub async fn inner_update_token(update_status: &UpdateTokenStatus) {
     match LocalAccount::local_account().await {
         Ok(mut local_account) => {
-            let tx_req = TxReq::UpdateMeta(update_status.req.to_owned());
+            let tx_req = ReqType::UpdateMeta(update_status.req.to_owned());
             if let Ok(signed_txn) =
-                tx_builder::get_signed_tx(&mut local_account, tx_req, None).await
+                tx_builder::get_signed_tx(&mut local_account, &tx_req, None).await
             {
                 log!(
                     DEBUG,
                     "[update_token::inner_update_token] SignedTransaction: {:#?} ",
                     signed_txn
                 );
-                let client = RestClient::new();
+                let client = RestClient::client();
                 match client.summit_tx(&signed_txn, &client.forward).await {
                     Ok(tx) => {
                         log!(
@@ -147,7 +147,7 @@ pub async fn inner_update_token(update_status: &UpdateTokenStatus) {
 
 pub async fn update_req_status(tx_hash: String, update_status: &UpdateTokenStatus) {
     // query signature status
-    let client = RestClient::new();
+    let client = RestClient::client();
     let tx = client.get_transaction_by_hash(tx_hash.to_owned(), &client.forward).await;
     match tx {
         Err(e) => {

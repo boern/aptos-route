@@ -4,6 +4,7 @@ use crate::constants::{
     COIN_MODULE, COIN_PKG_ID, DEFAULT_GAS_BUDGET, MINT_WITH_TICKET_FUNC, SUI_COIN,
     UPDATE_DESC_FUNC, UPDATE_ICON_FUNC, UPDATE_NAME_FUNC, UPDATE_SYMBOL_FUNC,
 };
+use crate::handler::handle_tx::{build_and_send_tx, update_req_status, TxReqStatus};
 use crate::ic_log::{DEBUG, ERROR};
 
 use crate::state::{mutate_state, read_state, AptosToken, UpdateType};
@@ -26,9 +27,12 @@ use ic_cdk::api::management_canister::http_request::{
 use aptos_crypto::ed25519::{Ed25519PrivateKey, Ed25519PublicKey, Ed25519Signature};
 
 use aptos_types::transaction::{authenticator::AuthenticationKey, SignatureCheckedTransaction};
+use ic_stable_structures::storable::Bound;
+use ic_stable_structures::Storable;
 use move_core_types::account_address::AccountAddress;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::future;
@@ -130,7 +134,7 @@ impl LocalAccount {
             KeyType::Native(_) => LocalAccountAuthenticator::NativeKey(account_key),
         };
 
-        let client = RestClient::new();
+        let client = RestClient::client();
         let account = client
             .get_account(format!("{}", address), None, &client.forward)
             .await?;
@@ -168,7 +172,7 @@ impl LocalAccount {
         //         s.get().forward.to_owned(),
         //     )
         // });
-        let client = RestClient::new();
+        let client = RestClient::client();
         let account = client
             .get_account(format!("{}", self.address), None, &client.forward)
             .await?;
@@ -454,7 +458,7 @@ impl Default for TxOptions {
         }
     }
 }
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CreateTokenReq {
     pub token_id: String,
     pub name: String,
@@ -465,8 +469,9 @@ pub struct CreateTokenReq {
     pub project_uri: String,
 }
 
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UpdateMetaReq {
+    pub token_id: String,
     pub fa_obj: String,
     pub name: Option<String>,
     pub symbol: Option<String>,
@@ -475,34 +480,94 @@ pub struct UpdateMetaReq {
     pub project_uri: Option<String>,
 }
 
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct MintTokenReq {
     pub ticket_id: String,
+    pub token_id: String,
     pub fa_obj: String,
     pub recipient: String,
     pub mint_acmount: u64,
 }
 
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BurnTokenReq {
     pub fa_obj: String,
     pub burn_acmount: u64,
     pub memo: Option<String>,
 }
 
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TransferReq {
     pub recipient: String,
     pub amount: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, CandidType)]
-pub enum TxReq {
+#[derive(Debug, Clone, Serialize, Deserialize, CandidType, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReqType {
     CreateToken(CreateTokenReq),
     UpdateMeta(UpdateMetaReq),
     MintToken(MintTokenReq),
     BurnToken(BurnTokenReq),
     CollectFee(u64),
     RemoveTicket(String),
-    // Transfer(TransferReq),
+    TransferApt(TransferReq),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, CandidType, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TxReq {
+    pub req_type: ReqType,
+    pub tx_hash: Option<String>,
+    pub retry: u64,
+}
+
+impl Storable for TxReq {
+    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+        let bytes = bincode::serialize(&self).expect("failed to serialize TxReq");
+        Cow::Owned(bytes)
+    }
+
+    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
+        bincode::deserialize(bytes.as_ref()).expect("failed to deserialize TxReq")
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
+}
+
+impl TxReqStatus for TxReq {
+    fn handle_new_req(&self) {
+        build_and_send_tx(&self);
+    }
+
+    fn handle_pending(&self) {
+        update_req_status(&self);
+    }
+
+    fn hanle_finalized(&self) {
+        todo!()
+    }
+
+    fn hanled_failed(&self) {
+        todo!()
+    }
+}
+
+#[derive(CandidType, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TxStatus {
+    New,
+    Pending,
+    Finalized,
+    TxFailed { e: String },
+}
+
+impl Storable for TxStatus {
+    fn to_bytes(&self) -> std::borrow::Cow<[u8]> {
+        let bytes = bincode::serialize(&self).expect("failed to serialize TxStatus");
+        Cow::Owned(bytes)
+    }
+
+    fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Self {
+        bincode::deserialize(bytes.as_ref()).expect("failed to deserialize TxStatus")
+    }
+
+    const BOUND: Bound = Bound::Unbounded;
 }

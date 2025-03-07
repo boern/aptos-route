@@ -30,8 +30,9 @@ pub const UPDATE_SYMBOL_FUNC: &str = "update_symbol";
 pub const UPDATE_ICON_FUNC: &str = "update_icon";
 pub const UPDATE_DESC_FUNC: &str = "update_project_uri";
 pub const GET_FA_OBJ: &str = "get_fa_obj";
-// 1  MIST = 0.000_000_001 SUI.
-// 1 SUI =1_000_000_000 MIST
+pub const TRANSFER_COINS: &str = "transfer_coins";
+// 1  MIST = 0.000_000_001 APT.
+// 1 SUI =1_000_000_000 MAPT
 
 // redeem fee = gas fee + service fee
 // the service fee,there is 3 solutions

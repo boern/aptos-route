@@ -5,8 +5,8 @@ use crate::aptos_client::constants::DEVNET_CHAIN_ID;
 use crate::aptos_client::rest_client::{RestClient, RpcResult};
 
 use crate::aptos_client::{
-    rest_client, transfer, tx_builder, Account, AccountKey, AptosResult, CreateTokenReq,
-    LocalAccount, TxOptions, TxReq,
+    rest_client, tx_builder, Account, AccountKey, AptosResult, CreateTokenReq, LocalAccount,
+    ReqType, TxOptions, TxStatus,
 };
 use crate::auth::{is_admin, set_perms, Permission};
 use crate::call_error::{CallError, Reason};
@@ -42,7 +42,7 @@ use crate::state::{replace_state, AptosPort, AptosToken, RouteState, TokenResp, 
 use crate::types::{TicketId, Token, TokenId};
 // use crate::service::mint_token::MintTokenRequest;
 
-use crate::state::{mutate_state, read_state, TxStatus};
+use crate::state::{mutate_state, read_state};
 use crate::types::ChainState;
 use crate::types::{Chain, ChainId, Ticket};
 use ic_canister_log::log;
@@ -274,6 +274,13 @@ fn get_token_list() -> Vec<TokenResp> {
     read_state(|s| {
         s.tokens
             .iter()
+            .filter(|(token_id, token)| {
+                s.atptos_tokens.contains_key(&token_id.to_string())
+                    && matches!(
+                        s.atptos_tokens.get(&token_id.to_string()).unwrap().status,
+                        TxStatus::Finalized
+                    )
+            })
             .map(|(_, token)| token.to_owned().into())
             .collect()
     })
@@ -490,7 +497,7 @@ pub fn debug(enable: bool) {
 
 #[update(guard = "is_admin")]
 pub async fn get_account(address: String, ledger_version: Option<u64>) -> Result<String, String> {
-    let client = RestClient::new();
+    let client = RestClient::client();
 
     let ret = client
         .get_account(address, ledger_version, &client.forward)
@@ -513,7 +520,7 @@ pub async fn get_account_balance(
     address: String,
     asset_type: Option<String>,
 ) -> Result<u64, String> {
-    let client = RestClient::new();
+    let client = RestClient::client();
 
     let ret = client
         .get_account_balance(address, asset_type, &client.forward)
@@ -541,7 +548,7 @@ pub async fn get_fa_obj_from_port(
     view_func: String,
     token_id: String,
 ) -> Result<Vec<String>, String> {
-    let client = RestClient::new();
+    let client = RestClient::client();
 
     let ret = client
         .get_fa_obj(view_func, token_id, &client.forward)
@@ -564,63 +571,9 @@ pub async fn get_fa_obj_from_port(
     }
 }
 
-#[update(guard = "is_admin")]
-pub async fn transfer_aptos(
-    recipient: String,
-    amount: u64,
-    key_type: SnorKeyType,
-) -> Result<String, String> {
-
-    let mut local_account = LocalAccount::local_account()
-        .await
-        .map_err(|e| e.to_string())?;
-    log!(
-        DEBUG,
-        "[service::transfer_aptos] local_account: {:?} ",
-        local_account
-    );
-    let to_account = AccountAddress::from_str(&recipient).map_err(|e| e.to_string())?;
-    log!(
-        DEBUG,
-        "[service::transfer_aptos] to_account: {:?} ",
-        to_account
-    );
-    // devnet chain id is 174
-    // let chain_id = 174;
-    let txn = transfer::get_signed_transfer_txn(
-        DEVNET_CHAIN_ID,
-        &mut local_account,
-        to_account,
-        amount,
-        None,
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    log!(
-        DEBUG,
-        "[service::transfer_aptos] SignedTransaction: {:#?} ",
-        txn
-    );
-    // transfer the aptos coin to a different address
-    let client = RestClient::new();
-    let ret = client.summit_tx(&txn, &client.forward).await;
-    log!(DEBUG, "[service::transfer_aptos] result: {:#?} ", ret);
-
-    match ret {
-        Ok(pending_tx) => {
-            let pending_tx_json = serde_json::to_string(&pending_tx).map_err(|e| e.to_string())?;
-            Ok(pending_tx_json)
-        }
-        Err(e) => {
-            log!(DEBUG, "[service::transfer_aptos] ret error : {:?}", e);
-            Err(format!("Error transfer_aptos: {:?}", e))
-        }
-    }
-}
-
 //just for test and devops
 #[update(guard = "is_admin")]
-pub async fn submit_tx(req: TxReq) -> Result<String, String> {
+pub async fn submit_tx(req: ReqType) -> Result<String, String> {
     log!(DEBUG, "[service::submit_tx] TxReq: {:?} ", req);
 
     let mut local_account = LocalAccount::local_account()
@@ -633,7 +586,7 @@ pub async fn submit_tx(req: TxReq) -> Result<String, String> {
         local_account
     );
 
-    let signed_txn = tx_builder::get_signed_tx(&mut local_account, req, None)
+    let signed_txn = tx_builder::get_signed_tx(&mut local_account, &req, None)
         .await
         .map_err(|e| e.to_string())?;
     log!(
@@ -648,7 +601,7 @@ pub async fn submit_tx(req: TxReq) -> Result<String, String> {
         Err(e) => return Err(e.to_string()),
     };
     // transfer the aptos coin to a different address
-    let client = RestClient::new();
+    let client = RestClient::client();
     let ret = client.summit_tx(&signed_txn, &client.forward).await;
     log!(DEBUG, "[service::submit_tx] result: {:#?} ", ret);
 
@@ -667,7 +620,7 @@ pub async fn submit_tx(req: TxReq) -> Result<String, String> {
 // devops
 #[update(guard = "is_admin")]
 pub async fn get_transaction_by_hash(txn_hash: String) -> Result<String, String> {
-    let client = RestClient::new();
+    let client = RestClient::client();
 
     let ret = client
         .get_transaction_by_hash(txn_hash, &client.forward)
