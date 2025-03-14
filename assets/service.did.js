@@ -57,20 +57,12 @@ export const idlFactory = ({ IDL }) => {
     'ChainKey' : IDL.Null,
   });
   const Result = IDL.Variant({ 'Ok' : IDL.Text, 'Err' : IDL.Text });
-  const TxStatus = IDL.Variant({
-    'New' : IDL.Null,
-    'Finalized' : IDL.Null,
-    'TxFailed' : IDL.Record({ 'e' : IDL.Text }),
-    'Pending' : IDL.Null,
-  });
   const AptosToken = IDL.Record({
-    'status' : TxStatus,
     'fa_obj_id' : IDL.Opt(IDL.Text),
     'type_tag' : IDL.Opt(IDL.Text),
-    'tx_hash' : IDL.Opt(IDL.Text),
-    'retry' : IDL.Nat64,
   });
-  const Result_1 = IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text });
+  const Result_1 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Text), 'Err' : IDL.Text });
+  const Result_2 = IDL.Variant({ 'Ok' : IDL.Nat64, 'Err' : IDL.Text });
   const ChainType = IDL.Variant({
     'SettlementChain' : IDL.Null,
     'ExecutionChain' : IDL.Null,
@@ -84,13 +76,11 @@ export const idlFactory = ({ IDL }) => {
     'chain_type' : ChainType,
     'contract_address' : IDL.Opt(IDL.Text),
   });
-  const Result_2 = IDL.Variant({ 'Ok' : IDL.Vec(IDL.Text), 'Err' : IDL.Text });
   const Permission = IDL.Variant({ 'Update' : IDL.Null, 'Query' : IDL.Null });
   const TaskType = IDL.Variant({
     'GetTickets' : IDL.Null,
+    'HandleTx' : IDL.Null,
     'GetDirectives' : IDL.Null,
-    'MintToken' : IDL.Null,
-    'UpdateToken' : IDL.Null,
   });
   const Seqs = IDL.Record({
     'next_directive_seq' : IDL.Nat64,
@@ -183,6 +173,18 @@ export const idlFactory = ({ IDL }) => {
     'MintToken' : MintTokenReq,
     'UpdateMeta' : UpdateMetaReq,
   });
+  const TxStatus = IDL.Variant({
+    'New' : IDL.Null,
+    'Finalized' : IDL.Null,
+    'TxFailed' : IDL.Record({ 'e' : IDL.Text }),
+    'Pending' : IDL.Null,
+  });
+  const TxReq = IDL.Record({
+    'req_type' : ReqType,
+    'tx_hash' : IDL.Opt(IDL.Text),
+    'tx_status' : TxStatus,
+    'retry' : IDL.Nat64,
+  });
   const Result_3 = IDL.Variant({ 'Ok' : IDL.Null, 'Err' : IDL.Text });
   return IDL.Service({
     'add_aptos_port' : IDL.Func([AptosPort], [], []),
@@ -190,22 +192,24 @@ export const idlFactory = ({ IDL }) => {
     'aptos_ports' : IDL.Func([], [IDL.Vec(AptosPort)], ['query']),
     'aptos_route_address' : IDL.Func([SnorKeyType], [Result], []),
     'aptos_token' : IDL.Func([IDL.Text], [IDL.Opt(AptosToken)], ['query']),
+    'fa_obj_from_port' : IDL.Func([IDL.Text, IDL.Text], [Result_1], []),
     'forward' : IDL.Func([], [IDL.Opt(IDL.Text)], ['query']),
     'get_account' : IDL.Func([IDL.Text, IDL.Opt(IDL.Nat64)], [Result], []),
     'get_account_balance' : IDL.Func(
         [IDL.Text, IDL.Opt(IDL.Text)],
-        [Result_1],
+        [Result_2],
         [],
       ),
     'get_chain_list' : IDL.Func([], [IDL.Vec(Chain)], ['query']),
-    'get_fa_obj_from_port' : IDL.Func([IDL.Text, IDL.Text], [Result_2], []),
+    'get_events' : IDL.Func([IDL.Text], [Result_1], []),
     'get_fee_account' : IDL.Func([], [IDL.Text], ['query']),
     'get_gas_budget' : IDL.Func([], [IDL.Nat64], []),
     'get_redeem_fee' : IDL.Func([IDL.Text], [IDL.Opt(IDL.Nat)], ['query']),
     'get_route_config' : IDL.Func([], [RouteConfig], ['query']),
     'get_token' : IDL.Func([IDL.Text], [IDL.Opt(Token)], ['query']),
     'get_token_list' : IDL.Func([], [IDL.Vec(TokenResp)], ['query']),
-    'get_transaction_by_hash' : IDL.Func([IDL.Text], [Result], []),
+    'get_transaction' : IDL.Func([IDL.Text], [Result], []),
+    'get_tx_req' : IDL.Func([IDL.Text], [IDL.Opt(TxReq)], ['query']),
     'rpc_provider' : IDL.Func([], [Provider], ['query']),
     'submit_tx' : IDL.Func([ReqType], [Result], []),
     'update_aptos_token' : IDL.Func([IDL.Text, AptosToken], [Result_3], []),

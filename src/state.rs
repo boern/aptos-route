@@ -1,16 +1,18 @@
 #![allow(unused)]
-use crate::aptos_client::{TxReq, TxStatus, UpdateMetaReq};
-use crate::ck_eddsa::KeyType;
+use crate::aptos_client::{CreateTokenReq, ReqType, TxReq, TxStatus, UpdateMetaReq};
+use crate::ck_eddsa::{hash_with_sha256, KeyType};
 use crate::config::{mutate_config, read_config, RouteConfig};
 
 use crate::handler::gen_ticket::GenerateTicketReq;
-use crate::handler::mint_token::MintTokenRequest;
+// use crate::handler::mint_token::MintTokenRequest;
+use crate::ic_log::DEBUG;
 // use crate::handler::burn_token::BurnTx;
 // use crate::handler::clear_ticket::ClearTx;
 // use crate::handler::gen_ticket::GenerateTicketReq;
 use crate::lifecycle::InitArgs;
 use crate::memory::Memory;
 use candid::{CandidType, Principal};
+use ic_canister_log::log;
 use ic_stable_structures::StableBTreeMap;
 use ic_stable_structures::StableCell;
 
@@ -150,9 +152,9 @@ impl Storable for AptosPort {
 pub struct AptosToken {
     pub fa_obj_id: Option<String>,
     pub type_tag: Option<String>,
-    pub retry: u64,
-    pub tx_hash: Option<String>,
-    pub status: TxStatus,
+    // pub retry: u64,
+    // pub tx_hash: Option<String>,
+    // pub status: TxStatus,
 }
 
 impl Default for AptosToken {
@@ -160,9 +162,9 @@ impl Default for AptosToken {
         Self {
             fa_obj_id: None,
             type_tag: None,
-            retry: 0,
-            tx_hash: None,
-            status: TxStatus::New,
+            // retry: 0,
+            // tx_hash: None,
+            // status: TxStatus::New,
         }
     }
 }
@@ -194,8 +196,8 @@ pub struct RouteState {
 
     #[serde(skip, default = "crate::memory::init_update_tokens")]
     pub update_token_queue: StableBTreeMap<TicketId, UpdateTokenStatus, Memory>,
-    #[serde(skip, default = "crate::memory::init_mint_token_requests")]
-    pub mint_token_requests: StableBTreeMap<TicketId, MintTokenRequest, Memory>,
+    // #[serde(skip, default = "crate::memory::init_mint_token_requests")]
+    // pub mint_token_requests: StableBTreeMap<TicketId, MintTokenRequest, Memory>,
     #[serde(skip, default = "crate::memory::init_gen_ticket_reqs")]
     pub gen_ticket_reqs: StableBTreeMap<TicketId, GenerateTicketReq, Memory>,
     #[serde(skip, default = "crate::memory::init_seed")]
@@ -205,10 +207,11 @@ pub struct RouteState {
     #[serde(skip, default = "crate::memory::init_aptos_ports")]
     pub aptos_ports: StableBTreeMap<String, AptosPort, Memory>,
     #[serde(skip, default = "crate::memory::init_aptos_tokens")]
-    pub atptos_tokens: StableBTreeMap<TokenId, AptosToken, Memory>,
+    pub aptos_tokens: StableBTreeMap<TokenId, AptosToken, Memory>,
 
+    //TODO: refactor tx queue key as hash_with_sha256
     #[serde(skip, default = "crate::memory::init_tx_queue")]
-    pub tx_queue: StableBTreeMap<TxReq, TxStatus, Memory>,
+    pub tx_queue: StableBTreeMap<String, TxReq, Memory>,
 }
 
 impl RouteState {
@@ -220,14 +223,14 @@ impl RouteState {
             tokens: StableBTreeMap::init(crate::memory::get_tokens_memory()),
 
             update_token_queue: StableBTreeMap::init(crate::memory::get_update_tokens_memory()),
-            mint_token_requests: StableBTreeMap::init(
-                crate::memory::get_mint_token_requests_memory(),
-            ),
+            // mint_token_requests: StableBTreeMap::init(
+            //     crate::memory::get_mint_token_requests_memory(),
+            // ),
             gen_ticket_reqs: StableBTreeMap::init(crate::memory::get_gen_ticket_req_memory()),
             seeds: StableBTreeMap::init(crate::memory::get_seeds_memory()),
             route_addresses: StableBTreeMap::init(crate::memory::get_route_addresses_memory()),
             aptos_ports: StableBTreeMap::init(crate::memory::get_aptos_ports_memory()),
-            atptos_tokens: StableBTreeMap::init(crate::memory::get_aptos_tokens_memory()),
+            aptos_tokens: StableBTreeMap::init(crate::memory::get_aptos_tokens_memory()),
             tx_queue: StableBTreeMap::init(crate::memory::get_tx_queue_memory()),
         }
     }
@@ -237,7 +240,75 @@ impl RouteState {
     }
 
     pub fn add_token(&mut self, token: Token) {
-        self.tokens.insert(token.token_id.to_owned(), token);
+        self.tokens
+            .insert(token.token_id.to_owned(), token.to_owned());
+        if self.aptos_tokens.get(&token.token_id).is_none() {
+            let aptos_token = AptosToken::default();
+            self.aptos_tokens
+                .insert(token.token_id.to_owned(), aptos_token.to_owned());
+            let create_token_req = CreateTokenReq {
+                token_id: token.token_id.to_owned(),
+                name: token.name.to_owned(),
+                symbol: token.symbol.to_owned(),
+                decimals: token.decimals.to_owned(),
+                icon_uri: token.icon.to_owned().unwrap_or_default(),
+                max_supply: None,
+                project_uri: token
+                    .metadata
+                    .get("project_uri")
+                    .unwrap_or(&"https://www.omnity.network".to_string())
+                    .to_owned(),
+            };
+            let req_id = hash_with_sha256(
+                &bincode::serialize(&create_token_req)
+                    .expect("failed to serialize create_token_req "),
+            );
+            let tx_req = TxReq {
+                req_type: ReqType::CreateToken(create_token_req.to_owned()),
+                tx_hash: None,
+                tx_status: TxStatus::New,
+                retry: 0,
+            };
+
+            self.tx_queue.insert(req_id, tx_req);
+        }
+    }
+
+    pub fn update_token(&mut self, update_token: Token) {
+        self.tokens
+            .insert(update_token.token_id.to_owned(), update_token.to_owned());
+        if let Some(current_token) = self.tokens.get(&update_token.token_id) {
+            // only update name,symbol and icon
+            if !current_token.name.eq(&update_token.name)
+                || !current_token.symbol.eq(&update_token.symbol)
+                || !current_token.icon.eq(&update_token.icon)
+            {
+                let aptos_token = read_state(|s| s.aptos_tokens.get(&update_token.token_id))
+                    .expect("aptos token is None");
+                let update_meta_req = UpdateMetaReq {
+                    token_id: update_token.token_id.to_owned(),
+                    fa_obj: aptos_token
+                        .fa_obj_id
+                        .expect("fungible asset object id is None"),
+                    name: Some(update_token.name.to_owned()),
+                    symbol: Some(update_token.symbol.to_owned()),
+                    decimals: None,
+                    icon_uri: update_token.icon.to_owned(),
+                    project_uri: None,
+                };
+                let req_id = hash_with_sha256(
+                    &bincode::serialize(&update_meta_req)
+                        .expect("failed to serialize update_meta_req"),
+                );
+                let tx_req = TxReq {
+                    req_type: ReqType::UpdateMeta(update_meta_req.to_owned()),
+                    tx_hash: None,
+                    tx_status: TxStatus::New,
+                    retry: 0,
+                };
+                mutate_state(|s| s.tx_queue.insert(req_id, tx_req));
+            }
+        }
     }
 
     pub fn toggle_chain_state(&mut self, toggle: ToggleState) {

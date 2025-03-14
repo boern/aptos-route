@@ -9,15 +9,29 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use super::constants::APTOS_API_VERSION;
+use super::constants::FORWARD_KEY;
 use super::constants::IDEMPOTENCY_KEY;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum AtosRequest {
-    GetAccount { address: String },
-    GetAccountBalance { address: String, asset_type: String },
-    GetFaObj { view_func: String, token_id: String },
-    SubmitTransaction { txn: SignedTransaction },
-    GetTransactionByHash { txn_hash: String },
+    GetAccount {
+        address: String,
+    },
+    GetAccountBalance {
+        address: String,
+        asset_type: String,
+    },
+    GetFaObj {
+        view_func: String,
+        token_id: String,
+    },
+    SubmitTransaction {
+        txn: SignedTransaction,
+    },
+    GetTransactionByHash {
+        txn_hash: String,
+        url: Option<String>,
+    },
 }
 
 impl fmt::Display for AtosRequest {
@@ -29,7 +43,7 @@ impl fmt::Display for AtosRequest {
                 asset_type,
             } => format!("/accounts/{}/balance/{}", address, asset_type),
             AtosRequest::SubmitTransaction { .. } => format!("/transactions"),
-            AtosRequest::GetTransactionByHash { txn_hash } => {
+            AtosRequest::GetTransactionByHash { txn_hash, .. } => {
                 format!("/transactions/by_hash/{}", txn_hash)
             }
             AtosRequest::GetFaObj { .. } => format!("/view"),
@@ -101,11 +115,17 @@ pub fn build_rest_req(req: AtosRequest) -> RestReq {
                 body: Some(txn_payload),
             }
         }
-        AtosRequest::GetTransactionByHash { txn_hash } => {
-            let headers = vec![HttpHeader {
+        AtosRequest::GetTransactionByHash { txn_hash, url } => {
+            let mut headers = vec![HttpHeader {
                 name: "Content-Type".to_string(),
                 value: "application/json, application/x-bcs".to_string(),
             }];
+            if let Some(url) = url {
+                headers.push(HttpHeader {
+                    name: FORWARD_KEY.to_string(),
+                    value: url,
+                });
+            }
             RestReq {
                 method: HttpMethod::GET,
                 headers,
@@ -155,7 +175,7 @@ pub fn build_rest_req(req: AtosRequest) -> RestReq {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // use super::*;
 
     #[test]
     fn test_build_rest_req() {}

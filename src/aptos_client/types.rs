@@ -1,10 +1,10 @@
 #![allow(unused)]
 use crate::config::{mutate_config, read_config, NATIVE_KEY_TYPE};
 use crate::constants::{
-    COIN_MODULE, COIN_PKG_ID, DEFAULT_GAS_BUDGET, MINT_WITH_TICKET_FUNC, SUI_COIN,
-    UPDATE_DESC_FUNC, UPDATE_ICON_FUNC, UPDATE_NAME_FUNC, UPDATE_SYMBOL_FUNC,
+    DEFAULT_GAS_BUDGET, MINT_WITH_TICKET_FUNC, UPDATE_DESC_FUNC, UPDATE_ICON_FUNC,
+    UPDATE_NAME_FUNC, UPDATE_SYMBOL_FUNC,
 };
-use crate::handler::handle_tx::{build_and_send_tx, update_req_status, TxReqStatus};
+use crate::handler::handle_tx::{build_and_send_tx, update_tx_status};
 use crate::ic_log::{DEBUG, ERROR};
 
 use crate::state::{mutate_state, read_state, AptosToken, UpdateType};
@@ -135,9 +135,7 @@ impl LocalAccount {
         };
 
         let client = RestClient::client();
-        let account = client
-            .get_account(format!("{}", address), None, &client.forward)
-            .await?;
+        let account = client.get_account(format!("{}", address), None).await?;
         log!(
             DEBUG,
             "[types::LocalAccount::local_account] get_account ret: {:?}",
@@ -174,7 +172,7 @@ impl LocalAccount {
         // });
         let client = RestClient::client();
         let account = client
-            .get_account(format!("{}", self.address), None, &client.forward)
+            .get_account(format!("{}", self.address), None)
             .await?;
         log!(
             DEBUG,
@@ -513,10 +511,11 @@ pub enum ReqType {
     TransferApt(TransferReq),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, CandidType, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, Deserialize, CandidType, PartialEq, Eq)]
 pub struct TxReq {
     pub req_type: ReqType,
     pub tx_hash: Option<String>,
+    pub tx_status: TxStatus,
     pub retry: u64,
 }
 
@@ -533,25 +532,7 @@ impl Storable for TxReq {
     const BOUND: Bound = Bound::Unbounded;
 }
 
-impl TxReqStatus for TxReq {
-    fn handle_new_req(&self) {
-        build_and_send_tx(&self);
-    }
-
-    fn handle_pending(&self) {
-        update_req_status(&self);
-    }
-
-    fn hanle_finalized(&self) {
-        todo!()
-    }
-
-    fn hanled_failed(&self) {
-        todo!()
-    }
-}
-
-#[derive(CandidType, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(CandidType, Clone, Debug, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum TxStatus {
     New,
     Pending,

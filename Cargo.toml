@@ -90,14 +90,24 @@ digest = "0.10.6"
 # http = "1"
 bincode = "1.3.3"
 
-aptos-types = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-types" }
-move-core-types = { git = "https://github.com/octopus-network/ic-aptos", package = "move-core-types" }
-aptos-crypto-derive = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-crypto-derive" }
-aptos-crypto = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-crypto" }
-aptos-cached-packages = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-cached-packages" }
-aptos-api-types = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-api-types" }
+# aptos-types = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-types" }
+# move-core-types = { git = "https://github.com/octopus-network/ic-aptos", package = "move-core-types" }
+# aptos-crypto-derive = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-crypto-derive" }
+# aptos-crypto = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-crypto" }
+# aptos-cached-packages = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-cached-packages" }
+# aptos-api-types = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-api-types" }
 
+aptos-types = { path = "../ic-aptos/crates/aptos-types" }
+move-core-types = { path = "../ic-aptos/crates/move-core-types" }
+aptos-crypto-derive = { path = "../ic-aptos/crates/aptos-crypto-derive" }
+aptos-crypto = { path = "../ic-aptos/crates/aptos-crypto" }
+aptos-cached-packages = { path = "../ic-aptos/crates/aptos-cached-packages" }
+aptos-api-types = { path = "../ic-aptos/crates/aptos-api-types" }
 aptos-global-constants = { git = "https://github.com/aptos-labs/aptos-core", branch = "mainnet", package = "aptos-global-constants" }
+
+# omnity-types = { git = "https://github.com/octopus-network/omnity-types.git" }
+omnity-types = { path = "/home/boern/workspace/ultraspace/omnity-types" }
+
 [patch.crates-io]
 
 [profile.release]
@@ -108,12 +118,12 @@ opt-level = 's'
 
 [dev-dependencies]
 urlencoding = "2.1"
-aptos-types = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-types" }
-move-core-types = { git = "https://github.com/octopus-network/ic-aptos", package = "move-core-types" }
-aptos-crypto-derive = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-crypto-derive" }
-aptos-crypto = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-crypto" }
-aptos-cached-packages = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-cached-packages" }
-aptos-api-types = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-api-types" }
+# aptos-types = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-types" }
+# move-core-types = { git = "https://github.com/octopus-network/ic-aptos", package = "move-core-types" }
+# aptos-crypto-derive = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-crypto-derive" }
+# aptos-crypto = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-crypto" }
+# aptos-cached-packages = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-cached-packages" }
+# aptos-api-types = { git = "https://github.com/octopus-network/ic-aptos", package = "aptos-api-types" }
 
 # ic-crypto-ed25519 = { git = "https://github.com/dfinity/ic", package = "ic-crypto-ed25519" }
 # tracing = "0.1.37"

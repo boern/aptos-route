@@ -7,12 +7,12 @@ use ic_stable_structures::{
 use std::cell::RefCell;
 
 use crate::aptos_client::TxReq;
-use crate::aptos_client::TxStatus;
+// use crate::aptos_client::TxStatus;
 use crate::ck_eddsa::KeyType;
 use crate::config::RouteConfig;
 
 use crate::handler::gen_ticket::GenerateTicketReq;
-use crate::handler::mint_token::MintTokenRequest;
+// use crate::handler::mint_token::MintTokenRequest;
 use crate::state::AptosPort;
 use crate::state::{AptosToken, UpdateTokenStatus};
 use crate::types::Ticket;
@@ -128,9 +128,9 @@ pub fn init_update_tokens() -> StableBTreeMap<String, UpdateTokenStatus, Memory>
     StableBTreeMap::init(get_update_tokens_memory())
 }
 
-pub fn init_mint_token_requests() -> StableBTreeMap<String, MintTokenRequest, Memory> {
-    StableBTreeMap::init(get_mint_token_requests_memory())
-}
+// pub fn init_mint_token_requests() -> StableBTreeMap<String, MintTokenRequest, Memory> {
+//     StableBTreeMap::init(get_mint_token_requests_memory())
+// }
 
 pub fn init_gen_ticket_reqs() -> StableBTreeMap<String, GenerateTicketReq, Memory> {
     StableBTreeMap::init(get_gen_ticket_req_memory())
@@ -157,6 +157,6 @@ pub fn init_aptos_ports() -> StableBTreeMap<String, AptosPort, Memory> {
     StableBTreeMap::init(get_aptos_ports_memory())
 }
 
-pub fn init_tx_queue() -> StableBTreeMap<TxReq, TxStatus, Memory> {
+pub fn init_tx_queue() -> StableBTreeMap<String, TxReq, Memory> {
     StableBTreeMap::init(get_tx_queue_memory())
 }

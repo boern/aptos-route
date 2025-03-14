@@ -21,15 +21,13 @@ echo
 
 # TODO: deploy customs
 
-# SUI_TESTNET_RPC="https://fullnode.testnet.sui.io:443"
-# SUI_MAINNET_RPC="https://fullnode.testnet.sui.io:443"
 
 SCHNORR_KEY_NAME="dfx_test_key"
 # SCHNORR_KEY_NAME="test_key_1"
 # SCHNORR_KEY_NAME="key_1"
 
-APTOS_CHAIN_ID="eAtops"
-FEE_ACCOUNT="0xaf9306cac62396be300b175046140c392eed876bd8ac0efac6301cea286fa272"
+APTOS_CHAIN_ID="eAptos"
+FEE_ACCOUNT="0x1961df628d2d224ecc91d56dfd0a4b9a545e9cf0ec9da2337c6c5c73f6171db8"
 nodes_in_subnet=34
 provider=Devnet
 gas_budget=10000000

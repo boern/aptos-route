@@ -6,13 +6,7 @@ type AptosPort = record {
   module : text;
   aptos_route : text;
 };
-type AptosToken = record {
-  status : TxStatus;
-  fa_obj_id : opt text;
-  type_tag : opt text;
-  tx_hash : opt text;
-  retry : nat64;
-};
+type AptosToken = record { fa_obj_id : opt text; type_tag : opt text };
 type BurnTokenReq = record {
   memo : opt text;
   fa_obj : text;
@@ -37,6 +31,29 @@ type CreateTokenReq = record {
   icon_uri : text;
   max_supply : opt nat;
   symbol : text;
+};
+type GenerateTicketError = variant {
+  InsufficientRedeemFee : record { provided : nat64; required : nat64 };
+  SendTicketErr : text;
+  TemporarilyUnavailable : text;
+  InsufficientAllowance : record { allowance : nat64 };
+  TransferFailure : text;
+  UnsupportedAction : text;
+  RedeemFeeNotSet;
+  UnsupportedChainId : text;
+  UnsupportedToken : text;
+  InsufficientFunds : record { balance : nat64 };
+};
+type GenerateTicketOk = record { ticket_id : text };
+type GenerateTicketReq = record {
+  action : TxAction;
+  token_id : text;
+  memo : opt text;
+  sender : text;
+  target_chain_id : text;
+  tx_hash : text;
+  amount : nat64;
+  receiver : text;
 };
 type InitArgs = record {
   admin : principal;
@@ -79,9 +96,10 @@ type ReqType = variant {
   UpdateMeta : UpdateMetaReq;
 };
 type Result = variant { Ok : text; Err : text };
-type Result_1 = variant { Ok : nat64; Err : text };
-type Result_2 = variant { Ok : vec text; Err : text };
-type Result_3 = variant { Ok; Err : text };
+type Result_1 = variant { Ok : vec text; Err : text };
+type Result_2 = variant { Ok : GenerateTicketOk; Err : GenerateTicketError };
+type Result_3 = variant { Ok : nat64; Err : text };
+type Result_4 = variant { Ok; Err : text };
 type RouteArg = variant { Upgrade : opt UpgradeArgs; Init : InitArgs };
 type RouteConfig = record {
   admin : principal;
@@ -111,7 +129,7 @@ type Seqs = record {
   tx_seq : nat64;
 };
 type SnorKeyType = variant { Native; ChainKey };
-type TaskType = variant { GetTickets; GetDirectives; MintToken; UpdateToken };
+type TaskType = variant { GetTickets; HandleTx; GetDirectives };
 type Token = record {
   decimals : nat8;
   token_id : text;
@@ -128,11 +146,18 @@ type TokenResp = record {
   symbol : text;
 };
 type TransferReq = record { recipient : text; amount : nat64 };
+type TxAction = variant { Burn; Redeem; Mint; Transfer };
 type TxOptions = record {
   max_gas_amount : nat64;
   chain_id : nat8;
   gas_unit_price : nat64;
   timeout_secs : nat64;
+};
+type TxReq = record {
+  req_type : ReqType;
+  tx_hash : opt text;
+  tx_status : TxStatus;
+  retry : nat64;
 };
 type TxStatus = variant {
   New;
@@ -160,27 +185,30 @@ type UpgradeArgs = record {
   chain_state : opt ChainState;
   nodes_in_subnet : opt nat32;
 };
-service : {
+service : (RouteArg) -> {
   add_aptos_port : (AptosPort) -> ();
   add_token : (Token) -> (opt Token);
   aptos_ports : () -> (vec AptosPort) query;
   aptos_route_address : (SnorKeyType) -> (Result);
   aptos_token : (text) -> (opt AptosToken) query;
+  fa_obj_from_port : (text, text) -> (Result_1);
   forward : () -> (opt text) query;
+  generate_ticket : (GenerateTicketReq) -> (Result_2);
   get_account : (text, opt nat64) -> (Result);
-  get_account_balance : (text, opt text) -> (Result_1);
+  get_account_balance : (text, opt text) -> (Result_3);
   get_chain_list : () -> (vec Chain) query;
-  get_fa_obj_from_port : (text, text) -> (Result_2);
+  get_events : (text) -> (Result_1);
   get_fee_account : () -> (text) query;
   get_gas_budget : () -> (nat64);
   get_redeem_fee : (text) -> (opt nat) query;
   get_route_config : () -> (RouteConfig) query;
   get_token : (text) -> (opt Token) query;
   get_token_list : () -> (vec TokenResp) query;
-  get_transaction_by_hash : (text) -> (Result);
+  get_transaction : (text) -> (Result);
+  get_tx_req : (text) -> (opt TxReq) query;
   rpc_provider : () -> (Provider) query;
   submit_tx : (ReqType) -> (Result);
-  update_aptos_token : (text, AptosToken) -> (Result_3);
+  update_aptos_token : (text, AptosToken) -> (Result_4);
   update_gas_budget : (nat64) -> ();
   update_port_package : (text) -> ();
   update_rpc_provider : (Provider) -> ();

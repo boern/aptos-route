@@ -7,8 +7,8 @@ use crate::aptos_client::request::{self, build_rest_req};
 use crate::aptos_client::utils::get_http_request_cost;
 use crate::config::{mutate_config, read_config};
 use crate::constants::{
-    COIN_MODULE, COIN_PKG_ID, DEFAULT_GAS_BUDGET, MINT_WITH_TICKET_FUNC, SUI_COIN,
-    UPDATE_DESC_FUNC, UPDATE_ICON_FUNC, UPDATE_NAME_FUNC, UPDATE_SYMBOL_FUNC,
+    DEFAULT_GAS_BUDGET, MINT_WITH_TICKET_FUNC, UPDATE_DESC_FUNC, UPDATE_ICON_FUNC,
+    UPDATE_NAME_FUNC, UPDATE_SYMBOL_FUNC,
 };
 use crate::ic_log::{DEBUG, ERROR};
 
@@ -160,15 +160,11 @@ impl RestClient {
         ));
 
         // add forward address
-        if let Some(forward) = forward.to_owned() {
-            let mut headers = req.headers;
-            headers.push(HttpHeader {
+        if let Some(forward) = forward {
+            req.headers.push(HttpHeader {
                 name: FORWARD_KEY.to_string(),
-                value: forward,
+                value: forward.to_owned(),
             });
-            log!(DEBUG, "[rpc_client::call] headers: {:?} ", headers);
-            // update req headers
-            req.headers = headers;
         }
 
         let request = CanisterHttpRequestArgument {
@@ -181,8 +177,6 @@ impl RestClient {
             transform: Some(transform),
         };
 
-        let url = req.url.to_string();
-        log!(DEBUG, "Calling url: {url} ");
         let cycles = get_http_request_cost(
             request.body.as_ref().map_or(0, |b| b.len() as u64),
             request.max_response_bytes.unwrap_or(2 * 1024 * 1024), // default 2Mb
@@ -196,18 +190,13 @@ impl RestClient {
 
                 log!(
                     DEBUG,
-                    "Got response (with {} bytes): {} from url: {} with status: {} the time elapsed: {}",
+                    "Got response (with {} bytes): {} and status: {} the time elapsed: {}",
                     response.body.len(),
                     String::from_utf8_lossy(&response.body),
-                    url,
                     response.status,
                     elapsed
                 );
 
-                // match String::from_utf8(response.body) {
-                //     Ok(body) => Ok(body),
-                //     Err(error) => Err(RpcError::ParseError(error.to_string())),
-                // }
                 Ok(response)
             }
             Err((r, m)) => {
@@ -215,10 +204,9 @@ impl RestClient {
                 let elapsed = (end - start) / 1_000_000_000;
                 log!(
                     ERROR,
-                    "Got response  error : {:?},{} from url: {} ,the time elapsed: {}",
+                    "Got response  error : {:?},{} and the time elapsed: {}",
                     r,
                     m,
-                    url,
                     elapsed
                 );
                 Err(AptosRouteError::HttpCallError(format!("({r:?}) {m:?}")))
@@ -230,12 +218,11 @@ impl RestClient {
         &self,
         address: String,
         ledger_version: Option<u64>,
-        forward: &Option<String>,
     ) -> AptosResult<Account> {
         let mut req = build_rest_req(request::AtosRequest::GetAccount { address });
         log!(DEBUG, "[rpc_client::get_account] request: {:?} ", req);
 
-        let response = self.call(req, 1000, None, forward).await?;
+        let response = self.call(req, 1000, None, &self.forward).await?;
         match self.json::<Account>(response) {
             Ok(response) => Ok(response.into_inner()),
             Err(e) => {
@@ -249,7 +236,6 @@ impl RestClient {
         &self,
         address: String,
         asset_type: Option<String>,
-        forward: &Option<String>,
     ) -> AptosResult<u64> {
         let mut req = build_rest_req(request::AtosRequest::GetAccountBalance {
             address,
@@ -261,7 +247,7 @@ impl RestClient {
             req
         );
 
-        let response = self.call(req, 1000, None, forward).await?;
+        let response = self.call(req, 1000, None, &self.forward).await?;
         log!(
             DEBUG,
             "[rpc_client::get_account_balance] response: {:?} ",
@@ -280,7 +266,6 @@ impl RestClient {
         &self,
         view_func: String,
         token_id: String,
-        forward: &Option<String>,
     ) -> AptosResult<Vec<String>> {
         let mut req = build_rest_req(request::AtosRequest::GetFaObj {
             view_func,
@@ -288,7 +273,7 @@ impl RestClient {
         });
         log!(DEBUG, "[rpc_client::get_fa_obj] request: {:?} ", req);
 
-        let response = self.call(req, 1000, None, forward).await?;
+        let response = self.call(req, 1000, None, &self.forward).await?;
         match self.json::<Vec<String>>(response) {
             Ok(response) => Ok(response.into_inner()),
             Err(e) => {
@@ -298,17 +283,13 @@ impl RestClient {
         }
     }
 
-    pub async fn summit_tx(
-        &self,
-        txn: &SignedTransaction,
-        forward: &Option<String>,
-    ) -> AptosResult<PendingTransaction> {
+    pub async fn summit_tx(&self, txn: &SignedTransaction) -> AptosResult<PendingTransaction> {
         let mut req = build_rest_req(request::AtosRequest::SubmitTransaction {
             txn: txn.to_owned(),
         });
         log!(DEBUG, "[rpc_client::summit_tx] request: {:?} ", req);
 
-        let response = self.call(req, 5000, None, forward).await?;
+        let response = self.call(req, 5000, None, &self.forward).await?;
         log!(DEBUG, "[rpc_client::summit_tx] response: {:?} ", response);
         match self.json::<PendingTransaction>(response) {
             Ok(response) => Ok(response.into_inner()),
@@ -322,9 +303,12 @@ impl RestClient {
     pub async fn get_transaction_by_hash(
         &self,
         txn_hash: String,
-        forward: &Option<String>,
+        url: &Option<String>,
     ) -> AptosResult<Transaction> {
-        let mut req = build_rest_req(request::AtosRequest::GetTransactionByHash { txn_hash });
+        let mut req = build_rest_req(request::AtosRequest::GetTransactionByHash {
+            txn_hash,
+            url: url.to_owned(),
+        });
         log!(
             DEBUG,
             "[rpc_client::get_transaction_by_hash] request: {:?} ",
@@ -332,7 +316,7 @@ impl RestClient {
         );
 
         let response = self
-            .call(req, TRANSACTION_RESPONSE_SIZE_ESTIMATE, None, forward)
+            .call(req, TRANSACTION_RESPONSE_SIZE_ESTIMATE, None, &url)
             .await?;
         match self.json::<Transaction>(response) {
             Ok(response) => Ok(response.into_inner()),
@@ -349,7 +333,6 @@ impl RestClient {
 
     fn check_response(&self, response: HttpResponse) -> AptosResult<HttpResponse> {
         // Check if status is within 200-299.
-        //TODO map err
         let status_code: u16 = response.status.to_owned().0.try_into().map_err(|_| {
             AptosRouteError::ParseError(format!("Invalid status code: {:?}", response.status))
         })?;

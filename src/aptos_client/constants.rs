@@ -57,7 +57,7 @@ pub const TX_MEMO_RESP_SIZE_ESTIMATE: u64 = 5 * 1024;
 pub const IDEMPOTENCY_KEY: &str = "X-Idempotency";
 
 /// forward key
-pub const FORWARD_KEY: &str = "X-Forward-Solana";
+pub const FORWARD_KEY: &str = "Omnity-Forward";
 
 pub const CLIENT_REQUEST_METHOD_HEADER: &str = "client-request-method";
 pub const CLIENT_SDK_TYPE_HEADER: &str = "client-sdk-type";
@@ -72,4 +72,4 @@ pub const APTOS_API_VERSION: &str = "v1";
 
 pub const MAINNET_CHAIN_ID: u8 = 1;
 pub const TESTNET_CHAIN_ID: u8 = 2;
-pub const DEVNET_CHAIN_ID: u8 = 174;
+pub const DEVNET_CHAIN_ID: u8 = 176;

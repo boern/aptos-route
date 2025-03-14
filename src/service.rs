@@ -6,18 +6,22 @@ use crate::aptos_client::rest_client::{RestClient, RpcResult};
 
 use crate::aptos_client::{
     rest_client, tx_builder, Account, AccountKey, AptosResult, CreateTokenReq, LocalAccount,
-    ReqType, TxOptions, TxStatus,
+    ReqType, TxOptions, TxReq, TxStatus,
 };
 use crate::auth::{is_admin, set_perms, Permission};
 use crate::call_error::{CallError, Reason};
 use crate::ck_eddsa::KeyType;
-use crate::constants::SUI_COIN;
 use crate::guard::TaskType;
+use crate::handler::gen_ticket::{
+    self, query_tx_from_multi_rpc, GenerateTicketError, GenerateTicketOk, GenerateTicketReq,
+};
+use crate::handler::scheduler;
 use crate::ic_log::{DEBUG, ERROR};
 
 use crate::memory::init_config;
 use crate::{aptos_client, ck_eddsa};
 
+use aptos_api_types::transaction::Transaction;
 use aptos_crypto::Signature;
 use candid::Principal;
 use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
@@ -26,13 +30,6 @@ use aptos_crypto::ed25519::Ed25519Signature;
 use move_core_types::account_address::AccountAddress;
 use serde_json::json;
 
-// use crate::handler::gen_ticket::{
-//     self, query_tx_from_multi_rpc, send_ticket, GenerateTicketError, GenerateTicketOk,
-//     GenerateTicketReq,
-// };
-// use crate::handler::mint_token::{self};
-
-// use crate::handler::scheduler;
 use crate::lifecycle::{self, RouteArg, UpgradeArgs};
 
 use crate::config::{
@@ -54,7 +51,6 @@ use ic_cdk::api::management_canister::http_request::{
 };
 
 use std::str::FromStr;
-
 use std::time::Duration;
 
 async fn get_random_seed() -> [u8; 64] {
@@ -94,7 +90,7 @@ fn init(args: RouteArg) {
 #[pre_upgrade]
 fn pre_upgrade() {
     log!(DEBUG, "begin to execute pre_upgrade ...");
-    // scheduler::stop_schedule(None);
+    scheduler::stop_schedule(None);
     lifecycle::pre_upgrade();
     log!(DEBUG, "pre_upgrade end!");
 }
@@ -111,7 +107,7 @@ fn post_upgrade(args: Option<RouteArg>) {
     }
 
     lifecycle::post_upgrade(upgrade_arg);
-    // scheduler::start_schedule(None);
+    scheduler::start_schedule(None);
     log!(DEBUG, "upgrade successfully!");
 }
 
@@ -124,14 +120,14 @@ pub async fn get_route_config() -> RouteConfig {
 #[update(guard = "is_admin", hidden = true)]
 pub fn start_schedule(tasks: Option<Vec<TaskType>>) {
     log!(DEBUG, "start schedule task: {:?} ... ", tasks);
-    // scheduler::start_schedule(tasks);
+    scheduler::start_schedule(tasks);
 }
 
 // devops method
 #[update(guard = "is_admin", hidden = true)]
 pub fn stop_schedule(tasks: Option<Vec<TaskType>>) {
     log!(DEBUG, "stop schedule task: {:?} ...", tasks);
-    // scheduler::stop_schedule(tasks);
+    scheduler::stop_schedule(tasks);
 }
 
 // devops method
@@ -178,7 +174,13 @@ pub async fn update_key_type(key_type: SnorKeyType) {
     let key_type = match key_type {
         SnorKeyType::ChainKey => KeyType::ChainKey,
         SnorKeyType::Native => {
-            let seed = get_random_seed().await;
+            let seed = read_state(|s| {
+                s.seeds
+                    .get(&NATIVE_KEY_TYPE.to_string())
+                    .unwrap_or_else(|| {
+                        panic!("No key with name {:?}", &NATIVE_KEY_TYPE.to_string())
+                    })
+            });
             KeyType::Native(seed.to_vec())
         }
     };
@@ -274,13 +276,7 @@ fn get_token_list() -> Vec<TokenResp> {
     read_state(|s| {
         s.tokens
             .iter()
-            .filter(|(token_id, token)| {
-                s.atptos_tokens.contains_key(&token_id.to_string())
-                    && matches!(
-                        s.atptos_tokens.get(&token_id.to_string()).unwrap().status,
-                        TxStatus::Finalized
-                    )
-            })
+            .filter(|(token_id, token)| s.aptos_tokens.contains_key(&token_id.to_string()))
             .map(|(_, token)| token.to_owned().into())
             .collect()
     })
@@ -358,7 +354,7 @@ fn update_token(token: Token) -> Result<Option<Token>, CallError> {
 
 #[query]
 pub async fn aptos_token(token_id: TokenId) -> Option<AptosToken> {
-    read_state(|s| s.atptos_tokens.get(&token_id))
+    read_state(|s| s.aptos_tokens.get(&token_id))
 }
 
 // devops method
@@ -366,7 +362,7 @@ pub async fn aptos_token(token_id: TokenId) -> Option<AptosToken> {
 #[update(guard = "is_admin")]
 pub async fn update_aptos_token(token_id: TokenId, aptos_token: AptosToken) -> Result<(), String> {
     mutate_state(|s| {
-        s.atptos_tokens.insert(token_id.to_string(), aptos_token);
+        s.aptos_tokens.insert(token_id.to_string(), aptos_token);
     });
 
     Ok(())
@@ -499,9 +495,7 @@ pub fn debug(enable: bool) {
 pub async fn get_account(address: String, ledger_version: Option<u64>) -> Result<String, String> {
     let client = RestClient::client();
 
-    let ret = client
-        .get_account(address, ledger_version, &client.forward)
-        .await;
+    let ret = client.get_account(address, ledger_version).await;
     log!(DEBUG, "[service::get_account] get_account ret: {:?}", ret);
     match ret {
         Ok(account) => {
@@ -522,9 +516,7 @@ pub async fn get_account_balance(
 ) -> Result<u64, String> {
     let client = RestClient::client();
 
-    let ret = client
-        .get_account_balance(address, asset_type, &client.forward)
-        .await;
+    let ret = client.get_account_balance(address, asset_type).await;
     log!(
         DEBUG,
         "[service::get_account_balance] get_account_balance ret: {:?}",
@@ -544,22 +536,30 @@ pub async fn get_account_balance(
 }
 
 #[update(guard = "is_admin")]
-pub async fn get_fa_obj_from_port(
-    view_func: String,
-    token_id: String,
-) -> Result<Vec<String>, String> {
+pub async fn fa_obj_from_port(view_func: String, token_id: String) -> Result<Vec<String>, String> {
     let client = RestClient::client();
 
-    let ret = client
-        .get_fa_obj(view_func, token_id, &client.forward)
-        .await;
+    let ret = client.get_fa_obj(view_func, token_id.to_owned()).await;
     log!(
         DEBUG,
         "[service::get_fa_obj_from_port] get_fa_obj ret: {:?}",
         ret
     );
     match ret {
-        Ok(fa_obj) => Ok(fa_obj),
+        Ok(fa_obj) => {
+            if let Some(fa_obj_id) = fa_obj.first() {
+                // update account status to Finalized
+                mutate_state(|s| {
+                    if let Some(aptos_token) = s.aptos_tokens.get(&token_id).as_mut() {
+                        aptos_token.fa_obj_id = Some(fa_obj_id.to_owned());
+                        s.aptos_tokens
+                            .insert(token_id.to_owned(), aptos_token.to_owned());
+                    }
+                });
+            }
+
+            Ok(fa_obj)
+        }
         Err(e) => {
             log!(
                 DEBUG,
@@ -602,7 +602,7 @@ pub async fn submit_tx(req: ReqType) -> Result<String, String> {
     };
     // transfer the aptos coin to a different address
     let client = RestClient::client();
-    let ret = client.summit_tx(&signed_txn, &client.forward).await;
+    let ret = client.summit_tx(&signed_txn).await;
     log!(DEBUG, "[service::submit_tx] result: {:#?} ", ret);
 
     match ret {
@@ -619,7 +619,7 @@ pub async fn submit_tx(req: ReqType) -> Result<String, String> {
 
 // devops
 #[update(guard = "is_admin")]
-pub async fn get_transaction_by_hash(txn_hash: String) -> Result<String, String> {
+pub async fn get_transaction(txn_hash: String) -> Result<String, String> {
     let client = RestClient::client();
 
     let ret = client
@@ -627,23 +627,96 @@ pub async fn get_transaction_by_hash(txn_hash: String) -> Result<String, String>
         .await;
     log!(
         DEBUG,
-        "[service::get_transaction_by_hash] get_transaction_by_hash ret: {:?}",
+        "[service::get_transaction] get_transaction ret: {:?}",
         ret
     );
     match ret {
-        Ok(account) => {
-            let account_json = serde_json::to_string(&account).map_err(|e| e.to_string())?;
-            Ok(account_json)
+        Ok(tx) => {
+            let tx_json = serde_json::to_string(&tx).map_err(|e| e.to_string())?;
+            Ok(tx_json)
         }
         Err(e) => {
             log!(
                 DEBUG,
-                "[service::get_transaction_by_hash] get_transaction_by_hash error : {:?}",
+                "[service::get_transaction] get_transaction error : {:?}",
                 e
             );
             Err(format!("Error get transaction by hash: {:?}", e))
         }
     }
+}
+
+// devops
+#[update(guard = "is_admin")]
+pub async fn get_events(tx_hash: String) -> Result<Vec<String>, String> {
+    let client = RestClient::client();
+
+    let ret = client
+        .get_transaction_by_hash(tx_hash, &client.forward)
+        .await;
+    log!(
+        DEBUG,
+        "[service::get_events] get_transaction_by_hash ret: {:?}",
+        ret
+    );
+    match ret {
+        Ok(tx) => {
+            // let account_json = serde_json::to_string(&account).map_err(|e| e.to_string())?;
+            match tx {
+                Transaction::PendingTransaction(pending_tx) => {
+                    Err("Pending tx no events!".to_string())
+                }
+                Transaction::UserTransaction(user_tx) => {
+                    // events_list.push(user_tx.events.to_owned())
+                    let events: Result<Vec<String>, String> = user_tx
+                        .events
+                        .iter()
+                        .map(|event| serde_json::to_string(&event).map_err(|e| e.to_string()))
+                        .collect();
+                    let events = events?;
+                    Ok(events)
+                }
+            }
+        }
+        Err(e) => {
+            log!(
+                DEBUG,
+                "[service::get_events] get_transaction_by_hash error : {:?}",
+                e
+            );
+            Err(format!("Error get transaction by hash: {:?}", e))
+        }
+    }
+}
+
+#[update(guard = "is_admin", hidden = true)]
+async fn valid_tx_from_multi_rpc(tx_hash: String) -> Result<String, String> {
+    let client = RestClient::client();
+    let multi_rpc_config = read_config(|s| s.get().multi_rpc_config.to_owned());
+    // let tx_digest = TransactionDigest::from_str(digest.as_ref()).unwrap();
+    let tx_response =
+        query_tx_from_multi_rpc(&client, tx_hash, multi_rpc_config.rpc_list.to_owned()).await;
+    let json_response = multi_rpc_config.valid_and_get_result(&tx_response)?;
+    let ret = serde_json::to_string(&json_response).map_err(|err| err.to_string())?;
+    Ok(ret)
+}
+
+// generate ticket ,called by front end or other sys
+#[update]
+async fn generate_ticket(args: GenerateTicketReq) -> Result<GenerateTicketOk, GenerateTicketError> {
+    gen_ticket::generate_ticket(args).await
+}
+
+// devops method
+#[update(guard = "is_admin", hidden = true)]
+pub async fn remove_gen_tickets_req(ticket_id: String) -> Option<GenerateTicketReq> {
+    mutate_state(|state| state.gen_ticket_reqs.remove(&ticket_id))
+}
+
+// devops method
+#[query]
+pub async fn get_tx_req(req_id: String) -> Option<TxReq> {
+    read_state(|s| s.tx_queue.get(&req_id))
 }
 
 #[query(hidden = true)]

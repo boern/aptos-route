@@ -11,11 +11,8 @@ export interface AptosPort {
   'aptos_route' : string,
 }
 export interface AptosToken {
-  'status' : TxStatus,
   'fa_obj_id' : [] | [string],
   'type_tag' : [] | [string],
-  'tx_hash' : [] | [string],
-  'retry' : bigint,
 }
 export interface BurnTokenReq {
   'memo' : [] | [string],
@@ -84,9 +81,9 @@ export type ReqType = { 'CreateToken' : CreateTokenReq } |
   { 'UpdateMeta' : UpdateMetaReq };
 export type Result = { 'Ok' : string } |
   { 'Err' : string };
-export type Result_1 = { 'Ok' : bigint } |
+export type Result_1 = { 'Ok' : Array<string> } |
   { 'Err' : string };
-export type Result_2 = { 'Ok' : Array<string> } |
+export type Result_2 = { 'Ok' : bigint } |
   { 'Err' : string };
 export type Result_3 = { 'Ok' : null } |
   { 'Err' : string };
@@ -122,9 +119,8 @@ export interface Seqs {
 export type SnorKeyType = { 'Native' : null } |
   { 'ChainKey' : null };
 export type TaskType = { 'GetTickets' : null } |
-  { 'GetDirectives' : null } |
-  { 'MintToken' : null } |
-  { 'UpdateToken' : null };
+  { 'HandleTx' : null } |
+  { 'GetDirectives' : null };
 export interface Token {
   'decimals' : number,
   'token_id' : string,
@@ -146,6 +142,12 @@ export interface TxOptions {
   'chain_id' : number,
   'gas_unit_price' : bigint,
   'timeout_secs' : bigint,
+}
+export interface TxReq {
+  'req_type' : ReqType,
+  'tx_hash' : [] | [string],
+  'tx_status' : TxStatus,
+  'retry' : bigint,
 }
 export type TxStatus = { 'New' : null } |
   { 'Finalized' : null } |
@@ -177,18 +179,20 @@ export interface _SERVICE {
   'aptos_ports' : ActorMethod<[], Array<AptosPort>>,
   'aptos_route_address' : ActorMethod<[SnorKeyType], Result>,
   'aptos_token' : ActorMethod<[string], [] | [AptosToken]>,
+  'fa_obj_from_port' : ActorMethod<[string, string], Result_1>,
   'forward' : ActorMethod<[], [] | [string]>,
   'get_account' : ActorMethod<[string, [] | [bigint]], Result>,
-  'get_account_balance' : ActorMethod<[string, [] | [string]], Result_1>,
+  'get_account_balance' : ActorMethod<[string, [] | [string]], Result_2>,
   'get_chain_list' : ActorMethod<[], Array<Chain>>,
-  'get_fa_obj_from_port' : ActorMethod<[string, string], Result_2>,
+  'get_events' : ActorMethod<[string], Result_1>,
   'get_fee_account' : ActorMethod<[], string>,
   'get_gas_budget' : ActorMethod<[], bigint>,
   'get_redeem_fee' : ActorMethod<[string], [] | [bigint]>,
   'get_route_config' : ActorMethod<[], RouteConfig>,
   'get_token' : ActorMethod<[string], [] | [Token]>,
   'get_token_list' : ActorMethod<[], Array<TokenResp>>,
-  'get_transaction_by_hash' : ActorMethod<[string], Result>,
+  'get_transaction' : ActorMethod<[string], Result>,
+  'get_tx_req' : ActorMethod<[string], [] | [TxReq]>,
   'rpc_provider' : ActorMethod<[], Provider>,
   'submit_tx' : ActorMethod<[ReqType], Result>,
   'update_aptos_token' : ActorMethod<[string, AptosToken], Result_3>,

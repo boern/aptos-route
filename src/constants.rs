@@ -11,11 +11,8 @@ pub const SCHNORR_KEY_NAME: &str = "key_1";
 // pub const EDDSA_SIGN_COST: u128 = 26_200_000_000;
 
 // pub const FEE_ACCOUNT: &str = "0xc8d919cef59bf118454313315950f8a10ddb49f799fcceac7479721891051e45";
-pub const FEE_TOKEN: &str = "SUI";
+pub const FEE_TOKEN: &str = "APT";
 
-pub const COIN_PKG_ID: &str = "0x2";
-pub const COIN_MODULE: &str = "coin";
-pub const SUI_COIN: &str = "0x2::sui::SUI";
 pub const DEFAULT_GAS_BUDGET: u64 = 5_000_000;
 //funcs
 pub const CREATE_FUNGIBLE_ASSET: &str = "create_fa";
@@ -47,5 +44,6 @@ pub const UPDATE_TOKEN_INTERVAL: Duration = Duration::from_secs(30);
 pub const QUERY_TICKET_INTERVAL: Duration = Duration::from_secs(10);
 pub const MINT_TOKEN_INTERVAL: Duration = Duration::from_secs(20);
 pub const CLEAR_INTERVAL: Duration = Duration::from_secs(30);
+pub const HANDLE_TX_INTERVAL: Duration = Duration::from_secs(15);
 // pub const RETRY_4_BUILDING: u64 = 10;
 pub const RETRY_NUM: u64 = 5;

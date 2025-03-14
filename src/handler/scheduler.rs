@@ -1,9 +1,11 @@
 #![allow(unused)]
-use super::{fecth_directive, mint_token};
+use super::fecth_directive;
 use crate::constants::CLEAR_INTERVAL;
 
+use crate::constants::HANDLE_TX_INTERVAL;
 use crate::handler::fetch_ticket;
-use crate::handler::update_token;
+use crate::handler::handle_tx;
+// use crate::handler::update_token;
 
 use crate::config::mutate_config;
 use crate::{
@@ -26,17 +28,19 @@ pub fn start_schedule(tasks: Option<Vec<TaskType>>) {
     match tasks {
         None => {
             fetch_directive_task();
-            update_token_meta_task();
+            // update_token_meta_task();
             fetch_tickets_task();
-            mint_token_task();
+            // mint_token_task();
+            handle_tx_task();
         }
         Some(tasks) => {
             for task in tasks {
                 match task {
                     TaskType::GetDirectives => fetch_directive_task(),
-                    TaskType::UpdateToken => update_token_meta_task(),
+                    // TaskType::UpdateToken => update_token_meta_task(),
                     TaskType::GetTickets => fetch_tickets_task(),
-                    TaskType::MintToken => mint_token_task(),
+                    // TaskType::MintToken => mint_token_task(),
+                    TaskType::HandleTx => handle_tx_task(),
                 }
             }
         }
@@ -76,27 +80,6 @@ pub fn stop_schedule(tasks: Option<Vec<TaskType>>) {
     }
 }
 
-fn mint_token_task() {
-    // handle to mint_to
-    let mint_token_timer_id = ic_cdk_timers::set_timer_interval(MINT_TOKEN_INTERVAL, || {
-        ic_cdk::spawn(async {
-            let _guard = match TimerGuard::new(TaskType::MintToken) {
-                Ok(guard) => guard,
-                Err(e) => {
-                    log!(WARNING, "TaskType::MintToken error : {:?}", e);
-                    return;
-                }
-            };
-
-            mint_token::mint_token().await;
-        });
-    });
-    log!(DEBUG, "MintToken task id : {:?}", mint_token_timer_id);
-    TIMER_GUARD.with_borrow_mut(|guard| {
-        guard.insert(TaskType::MintToken, mint_token_timer_id);
-    });
-}
-
 fn fetch_tickets_task() {
     // query_tickets task
     let query_ticket_timer_id = ic_cdk_timers::set_timer_interval(QUERY_TICKET_INTERVAL, || {
@@ -118,26 +101,6 @@ fn fetch_tickets_task() {
     });
 }
 
-fn update_token_meta_task() {
-    // handle to update token metadata
-    let update_token_timer_id = ic_cdk_timers::set_timer_interval(UPDATE_TOKEN_INTERVAL, || {
-        ic_cdk::spawn(async {
-            let _guard = match TimerGuard::new(TaskType::UpdateToken) {
-                Ok(guard) => guard,
-                Err(e) => {
-                    log!(WARNING, "TaskType::UpdateToken error : {:?}", e);
-                    return;
-                }
-            };
-            update_token::update_token().await;
-        });
-    });
-    log!(DEBUG, "UpdateToken task id: {:?}", update_token_timer_id);
-    TIMER_GUARD.with_borrow_mut(|guard| {
-        guard.insert(TaskType::UpdateToken, update_token_timer_id);
-    });
-}
-
 fn fetch_directive_task() {
     // query_directives task
     let directive_timer_id = ic_cdk_timers::set_timer_interval(QUERY_DERECTIVE_INTERVAL, || {
@@ -155,5 +118,25 @@ fn fetch_directive_task() {
     log!(DEBUG, "GetDirectives task id : {:?}", directive_timer_id);
     TIMER_GUARD.with_borrow_mut(|guard| {
         guard.insert(TaskType::GetDirectives, directive_timer_id);
+    });
+}
+
+fn handle_tx_task() {
+    // handle to update token metadata
+    let update_token_timer_id = ic_cdk_timers::set_timer_interval(HANDLE_TX_INTERVAL, || {
+        ic_cdk::spawn(async {
+            let _guard = match TimerGuard::new(TaskType::HandleTx) {
+                Ok(guard) => guard,
+                Err(e) => {
+                    log!(WARNING, "TaskType::HandleTx error : {:?}", e);
+                    return;
+                }
+            };
+            handle_tx::handle_tx_req().await;
+        });
+    });
+    log!(DEBUG, "HandleTx task id: {:?}", update_token_timer_id);
+    TIMER_GUARD.with_borrow_mut(|guard| {
+        guard.insert(TaskType::HandleTx, update_token_timer_id);
     });
 }

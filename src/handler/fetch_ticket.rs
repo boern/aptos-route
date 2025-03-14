@@ -1,10 +1,13 @@
 #![allow(unused)]
 use std::str::FromStr;
 
+use crate::aptos_client::{MintTokenReq, ReqType, TxReq, TxStatus};
+use crate::ck_eddsa::hash_with_sha256;
 use crate::config::{mutate_config, read_config};
 use crate::constants::TICKET_LIMIT_SIZE;
 use crate::ic_log::ERROR;
 
+use crate::state::read_state;
 use crate::types::{ChainId, ChainState, Error, Seq, Ticket};
 use aptos_types::account_address::AccountAddress;
 use candid::Principal;
@@ -48,8 +51,29 @@ pub async fn query_tickets() {
                     next_seq = seq + 1;
                     continue;
                 };
+                let fa_obj_id = read_state(|s| s.aptos_tokens.get(&ticket.token))
+                    .expect("aptos token is None")
+                    .fa_obj_id
+                    .expect("fungible asset object id is None");
+                let req_id = hash_with_sha256(
+                    &bincode::serialize(&ticket).expect("failed to serialize ticket"),
+                );
+                let mint_req = MintTokenReq {
+                    ticket_id: ticket.ticket_id.to_owned(),
+                    token_id: ticket.token.to_owned(),
+                    fa_obj: fa_obj_id,
+                    recipient: ticket.receiver.to_owned(),
+                    mint_acmount: ticket.amount.parse::<u64>().unwrap(),
+                };
+                let tx_req = TxReq {
+                    req_type: ReqType::MintToken(mint_req.to_owned()),
+                    tx_hash: None,
+                    tx_status: TxStatus::New,
+                    retry: 0,
+                };
 
-                mutate_state(|s| s.tickets_queue.insert(*seq, ticket.to_owned()));
+                mutate_state(|s| s.tx_queue.insert(req_id, tx_req));
+
                 next_seq = seq + 1;
             }
             mutate_config(|s| {
